@@ -1,142 +1,673 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, SafeAreaView, Modal, Animated, Platform, KeyboardAvoidingView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, SafeAreaView, Modal, Animated, Platform, KeyboardAvoidingView, ActivityIndicator, Switch } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Types
 type EnergyLevel = 'low' | 'medium' | 'high';
 type ViewMode = 'conversation' | 'oneThing' | 'list' | 'timeline' | 'dashboard' | 'minimal';
 type Personality = 'loyalFriend' | 'professional' | 'coach' | 'drillSergeant' | 'funny' | 'calm';
-interface Task { id: string; title: string; energy: EnergyLevel; completed: boolean; isMicroStep: boolean; }
-interface Message { id: string; role: 'nero' | 'user'; content: string; }
-interface Achievement { id: string; name: string; emoji: string; points: number; }
+type ThinkingMode = 'off' | 'minimal' | 'full';
 
-const C = { primary: '#6C5CE7', bg: '#0F0F1A', card: '#252542', text: '#FFFFFF', textSec: '#B8B8D1', textMuted: '#6C6C8A', success: '#00B894', warning: '#FDCB6E', error: '#FF7675', border: '#3D3D5C', gold: '#F9CA24' };
-const PERSONALITIES: Record<string, { name: string; emoji: string; greetings: string[] }> = {
-  loyalFriend: { name: 'Loyal Friend', emoji: '🤗', greetings: ["Hey! 💙", "Hi friend!"] },
-  professional: { name: 'Professional', emoji: '💼', greetings: ["Hello.", "Ready."] },
-  coach: { name: 'Coach', emoji: '🏆', greetings: ["Let's go! 💪"] },
-  drillSergeant: { name: 'Drill Sergeant', emoji: '🎖️', greetings: ["Attention!"] },
-  funny: { name: 'Funny', emoji: '😄', greetings: ["Heyyy! 😄"] },
-  calm: { name: 'Calm', emoji: '🧘', greetings: ["Welcome 🌿"] },
+interface Task { id: string; title: string; energy: EnergyLevel; completed: boolean; isMicroStep: boolean; parentId?: string; createdAt: string; }
+interface Message { id: string; role: 'nero' | 'user'; content: string; model?: string; thinking?: string; timestamp: string; }
+interface Breadcrumb { id: string; text: string; timestamp: string; }
+interface SavedContext { id: string; label: string; tasks: string[]; breadcrumbs: string[]; energy: EnergyLevel | null; timestamp: string; }
+interface ThoughtDump { id: string; text: string; timestamp: string; processed: boolean; }
+interface Achievement { id: string; name: string; emoji: string; description: string; points: number; }
+interface NeroMemory { likes: string[]; dislikes: string[]; triggers: string[]; patterns: string[]; }
+
+// Colors
+const C = {
+  primary: '#6C5CE7', primaryLight: '#A29BFE', bg: '#0F0F1A', card: '#252542', text: '#FFFFFF', 
+  textSec: '#B8B8D1', textMuted: '#6C6C8A', success: '#00B894', warning: '#FDCB6E', error: '#FF7675', 
+  border: '#3D3D5C', gold: '#F9CA24', teal: '#00CEC9', pink: '#FD79A8',
 };
-const VIEWS: Record<string, { name: string; emoji: string }> = { conversation: { name: 'Chat', emoji: '💬' }, oneThing: { name: 'Focus', emoji: '🎯' }, list: { name: 'List', emoji: '📝' }, timeline: { name: 'Time', emoji: '📅' }, dashboard: { name: 'Stats', emoji: '📊' }, minimal: { name: 'Zen', emoji: '🌙' } };
-const ACHIEVEMENTS: Achievement[] = [
-  { id: 'first_task', name: 'First Step', emoji: '👣', points: 10 }, { id: 'five_tasks', name: 'Getting Going', emoji: '🚀', points: 25 },
-  { id: 'ten_tasks', name: 'On a Roll', emoji: '🔥', points: 50 }, { id: 'first_chat', name: 'Hello Nero', emoji: '👋', points: 10 },
-  { id: 'low_energy_win', name: 'Low Energy Hero', emoji: '🌙', points: 30 }, { id: 'micro_win', name: 'Micro Win', emoji: '✨', points: 10 },
-];
-const CELEBRATIONS = ['Nice!', 'Crushed it!', 'Amazing!', 'Win!', 'Boom! 🎉'];
 
+// Personalities with full config
+const PERSONALITIES: Record<string, { name: string; emoji: string; desc: string; color: string; greetings: string[]; systemPrompt: string }> = {
+  loyalFriend: { 
+    name: 'Loyal Friend', emoji: '🤗', desc: 'Warm, supportive, casual', color: C.primary,
+    greetings: ["Hey there! 💙", "Hi friend!", "Hey! 👋", "Good to see you!"],
+    systemPrompt: "You are Nero, a warm and supportive AI companion. Be friendly, use casual language, light humor. Always be encouraging."
+  },
+  professional: { 
+    name: 'Professional', emoji: '💼', desc: 'Clear, efficient, minimal', color: C.teal,
+    greetings: ["Hello.", "Ready when you are.", "How can I help?"],
+    systemPrompt: "You are Nero, a professional AI assistant. Be clear, efficient, and concise. Skip unnecessary words."
+  },
+  coach: { 
+    name: 'Coach', emoji: '🏆', desc: 'Motivating, pushing gently', color: C.gold,
+    greetings: ["Let's go! 💪", "Ready to crush it?", "Champion! Let's do this!"],
+    systemPrompt: "You are Nero, a motivating coach. Be encouraging, push gently, celebrate wins enthusiastically."
+  },
+  drillSergeant: { 
+    name: 'Drill Sergeant', emoji: '🎖️', desc: 'Direct, firm, no excuses', color: '#E17055',
+    greetings: ["Attention!", "Time to work.", "No excuses today."],
+    systemPrompt: "You are Nero, a firm but fair drill sergeant. Be direct, no-nonsense, but ultimately supportive."
+  },
+  funny: { 
+    name: 'Funny', emoji: '😄', desc: 'Playful, jokes, light', color: C.pink,
+    greetings: ["Heyyy! 😄", "Look who showed up!", "The legend returns!"],
+    systemPrompt: "You are Nero, a playful and funny AI companion. Use humor, puns, and keep things light while being helpful."
+  },
+  calm: { 
+    name: 'Calm/Zen', emoji: '🧘', desc: 'Soft, gentle, no pressure', color: C.teal,
+    greetings: ["Welcome 🌿", "Peace, friend.", "Breathe. You're here now."],
+    systemPrompt: "You are Nero, a calm and zen AI companion. Be gentle, soft-spoken, never rush. Create a peaceful space."
+  },
+};
+
+const VIEWS: Record<string, { name: string; emoji: string; desc: string }> = {
+  conversation: { name: 'Chat', emoji: '💬', desc: 'Talk with Nero' },
+  oneThing: { name: 'Focus', emoji: '🎯', desc: 'One task at a time' },
+  list: { name: 'List', emoji: '📝', desc: 'All your tasks' },
+  timeline: { name: 'Timeline', emoji: '📅', desc: "Today's schedule" },
+  dashboard: { name: 'Stats', emoji: '📊', desc: 'Your progress' },
+  minimal: { name: 'Minimal', emoji: '🌙', desc: 'Low energy mode' },
+};
+
+const ACHIEVEMENTS: Achievement[] = [
+  { id: 'first_task', name: 'First Step', emoji: '👣', description: 'Complete your first task', points: 10 },
+  { id: 'five_tasks', name: 'Getting Going', emoji: '🚀', description: 'Complete 5 tasks', points: 25 },
+  { id: 'ten_tasks', name: 'On a Roll', emoji: '🔥', description: 'Complete 10 tasks', points: 50 },
+  { id: 'twenty_five', name: 'Unstoppable', emoji: '⚡', description: 'Complete 25 tasks', points: 100 },
+  { id: 'first_chat', name: 'Hello Nero', emoji: '👋', description: 'Start a conversation', points: 10 },
+  { id: 'ten_chats', name: 'Best Friends', emoji: '💙', description: 'Send 10 messages', points: 25 },
+  { id: 'low_energy_win', name: 'Low Energy Hero', emoji: '🌙', description: 'Complete task on low energy', points: 30 },
+  { id: 'micro_win', name: 'Micro Win', emoji: '✨', description: 'Complete a micro-step', points: 10 },
+  { id: 'breakdown_master', name: 'Task Breaker', emoji: '🔨', description: 'Break down 3 tasks', points: 25 },
+  { id: 'context_keeper', name: 'Context Keeper', emoji: '📌', description: 'Save your context', points: 15 },
+  { id: 'thought_dumper', name: 'Brain Dump', emoji: '💭', description: 'Capture 5 thoughts', points: 20 },
+  { id: 'comeback_kid', name: 'Comeback Kid', emoji: '🦸', description: 'Return after a day away', points: 30 },
+  { id: 'early_bird', name: 'Early Bird', emoji: '🌅', description: 'Complete task before 9am', points: 20 },
+  { id: 'night_owl', name: 'Night Owl', emoji: '🦉', description: 'Complete task after 10pm', points: 20 },
+];
+
+const CELEBRATIONS = ['Nice work! 🎉', 'Crushed it! 💪', 'Amazing! ⭐', "That's a win! 🏆", 'Boom! 💥', 'Yes! 🙌', 'Nailed it! 🎯', 'Fantastic! ✨'];
+const SURPRISES = [
+  { emoji: '🌟', msg: "You're amazing!" }, { emoji: '💎', msg: 'Rare focus achieved!' },
+  { emoji: '🦄', msg: 'Unicorn productivity!' }, { emoji: '🎁', msg: 'Surprise bonus!' },
+  { emoji: '⭐', msg: 'Star performer!' }, { emoji: '🔮', msg: 'Magic focus!' },
+];
+
+const MICRO_STARTS = [
+  "Just open it and look", "Set a 2-minute timer", "Do the tiniest first step",
+  "Just read the first line", "Move one thing", "Write one word",
+];
+
+// Helpers
 const genId = () => Math.random().toString(36).substr(2, 9) + Date.now();
 const getEC = (e: EnergyLevel) => e === 'high' ? C.success : e === 'medium' ? C.warning : C.error;
 const getEE = (e: EnergyLevel) => e === 'high' ? '⚡' : e === 'medium' ? '✨' : '🌙';
+const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const formatDate = (d: Date) => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+// AI Service - Claude Integration
+const ANTHROPIC_API_KEY = ''; // Will be set by user in settings
+
+const callClaudeAPI = async (
+  messages: Message[], 
+  personality: Personality, 
+  energy: EnergyLevel | null,
+  tasks: Task[],
+  memory: NeroMemory,
+  apiKey: string
+): Promise<{ content: string; thinking?: string; model: string }> => {
+  if (!apiKey) {
+    // Fallback to local responses if no API key
+    const pc = PERSONALITIES[personality];
+    const responses = [
+      `${pc.greetings[0]} What's the ONE thing you'd like to focus on?`,
+      `Got it! What's the smallest first step you could take?`,
+      `No pressure! Tell me what's on your mind when you're ready.`,
+      `That sounds manageable! Want me to add that as a task?`,
+      `You're doing great just being here. One tiny step at a time! 💙`,
+      `I hear you. Let's break that down into something tiny.`,
+      `Totally valid! What would feel like a win today?`,
+    ];
+    return { content: responses[Math.floor(Math.random() * responses.length)], model: 'local' };
+  }
+
+  const pendingTasks = tasks.filter(t => !t.completed).slice(0, 5);
+  const pc = PERSONALITIES[personality];
+  
+  const systemPrompt = `${pc.systemPrompt}
+
+CRITICAL RULES FOR ADHD USERS:
+- Ask only ONE question at a time
+- Offer maximum 3 options when giving choices
+- Keep responses SHORT (under 100 words)
+- Never guilt or shame - only encourage
+- Match the user's energy level: ${energy || 'unknown'}
+- Help with task initiation - suggest tiny first steps
+- Celebrate every small win enthusiastically
+
+Current context:
+- Energy level: ${energy || 'not set'}
+- Pending tasks: ${pendingTasks.map(t => t.title).join(', ') || 'none'}
+- User likes: ${memory.likes.join(', ') || 'learning...'}
+- User dislikes: ${memory.dislikes.join(', ') || 'learning...'}
+- Patterns noticed: ${memory.patterns.join(', ') || 'still learning...'}
+
+Remember: You're not just a task manager. You're a supportive companion who understands ADHD.`;
+
+  const apiMessages = messages.slice(-10).map(m => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: m.content
+  }));
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: apiMessages,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('API request failed');
+    }
+
+    const data = await response.json();
+    return {
+      content: data.content[0]?.text || "I'm here for you! What's on your mind?",
+      model: 'claude-sonnet',
+    };
+  } catch (error) {
+    console.error('Claude API error:', error);
+    const pc = PERSONALITIES[personality];
+    return { 
+      content: `${pc.greetings[0]} I'm having trouble connecting, but I'm still here! What can I help with?`,
+      model: 'fallback'
+    };
+  }
+};
+
+// Detect energy from message
+const detectEnergy = (text: string): EnergyLevel | null => {
+  const lower = text.toLowerCase();
+  const lowWords = ['tired', 'exhausted', 'low', 'rough', 'struggling', 'cant', "can't", 'hard', 'difficult', 'overwhelmed', 'anxious', 'stressed'];
+  const highWords = ['great', 'good', 'energized', 'productive', 'motivated', 'excited', 'ready', 'pumped', 'focused'];
+  
+  if (lowWords.some(w => lower.includes(w))) return 'low';
+  if (highWords.some(w => lower.includes(w))) return 'high';
+  return null;
+};
+
+// Extract tasks from message
+const extractTasks = (text: string): string[] => {
+  const patterns = [
+    /i need to (.+?)(?:\.|,|$)/gi,
+    /i have to (.+?)(?:\.|,|$)/gi,
+    /i should (.+?)(?:\.|,|$)/gi,
+    /remind me to (.+?)(?:\.|,|$)/gi,
+    /don't forget to (.+?)(?:\.|,|$)/gi,
+    /todo:?\s*(.+?)(?:\.|,|$)/gi,
+  ];
+  
+  const tasks: string[] = [];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const task = match[1].trim();
+      if (task.length > 2 && task.length < 100) {
+        tasks.push(task.charAt(0).toUpperCase() + task.slice(1));
+      }
+    }
+  }
+  return tasks;
+};
 
 export default function App() {
+  // Core State
   const [screen, setScreen] = useState<'welcome' | 'onboarding' | 'main' | 'settings'>('welcome');
   const [view, setView] = useState<ViewMode>('conversation');
   const [loading, setLoading] = useState(true);
+
+  // User State
   const [userName, setUserName] = useState('');
   const [neroName, setNeroName] = useState('Nero');
   const [personality, setPersonality] = useState<Personality>('loyalFriend');
   const [energy, setEnergy] = useState<EnergyLevel | null>(null);
+  const [apiKey, setApiKey] = useState('');
+
+  // Settings
+  const [thinkingMode, setThinkingMode] = useState<ThinkingMode>('minimal');
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  // Data State
   const [tasks, setTasks] = useState<Task[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
+  const [savedContexts, setSavedContexts] = useState<SavedContext[]>([]);
+  const [thoughtDumps, setThoughtDumps] = useState<ThoughtDump[]>([]);
   const [achievements, setAchievements] = useState<string[]>([]);
-  const [stats, setStats] = useState({ tasks: 0, msgs: 0, lowWins: 0, micro: 0, pts: 0 });
+  const [neroMemory, setNeroMemory] = useState<NeroMemory>({ likes: [], dislikes: [], triggers: [], patterns: [] });
+
+  // Stats
+  const [stats, setStats] = useState({
+    tasksCompleted: 0, messagesSent: 0, lowEnergyWins: 0, microSteps: 0,
+    tasksBreakdown: 0, contextsSaved: 0, thoughtsDumped: 0, daysActive: 1,
+    totalPoints: 0, lastActiveDate: new Date().toDateString(),
+  });
+
+  // UI State
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
+  const [thinkingText, setThinkingText] = useState('');
   const [newTask, setNewTask] = useState('');
   const [newEnergy, setNewEnergy] = useState<EnergyLevel>('medium');
   const [showAdd, setShowAdd] = useState(false);
   const [showCeleb, setShowCeleb] = useState(false);
   const [celebText, setCelebText] = useState('');
   const [showAch, setShowAch] = useState<Achievement | null>(null);
+  const [showThought, setShowThought] = useState(false);
+  const [thought, setThought] = useState('');
+  const [showCtx, setShowCtx] = useState(false);
+  const [ctxLabel, setCtxLabel] = useState('');
+  const [showContexts, setShowContexts] = useState(false);
   const [filter, setFilter] = useState<EnergyLevel | 'all'>('all');
+  const [listening, setListening] = useState(false);
   const [onbStep, setOnbStep] = useState(0);
+  const [showViewPicker, setShowViewPicker] = useState(false);
+  const [extractedTasks, setExtractedTasks] = useState<string[]>([]);
+  const [showExtracted, setShowExtracted] = useState(false);
+
+  // Animation refs
   const celebAnim = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<ScrollView>(null);
 
-  useEffect(() => { load(); }, []);
-  const load = async () => {
+  // Load data on mount
+  useEffect(() => { loadData(); }, []);
+
+  const loadData = async () => {
     try {
-      const [t, m, s, a, p, o] = await Promise.all([
-        AsyncStorage.getItem('@uf/tasks'), AsyncStorage.getItem('@uf/msgs'), AsyncStorage.getItem('@uf/stats'),
-        AsyncStorage.getItem('@uf/ach'), AsyncStorage.getItem('@uf/profile'), AsyncStorage.getItem('@uf/onb'),
-      ]);
-      if (t) setTasks(JSON.parse(t)); if (m) setMessages(JSON.parse(m)); if (s) setStats(JSON.parse(s)); if (a) setAchievements(JSON.parse(a));
-      if (p) { const pr = JSON.parse(p); setUserName(pr.name || ''); setNeroName(pr.nero || 'Nero'); setPersonality(pr.pers || 'loyalFriend'); }
-      setScreen(o === 'true' ? 'main' : 'welcome');
-    } catch (e) {} finally { setLoading(false); }
+      const keys = ['@uf/tasks', '@uf/msgs', '@uf/stats', '@uf/ach', '@uf/profile', '@uf/onb', '@uf/memory', '@uf/contexts', '@uf/thoughts', '@uf/bcs'];
+      const results = await AsyncStorage.multiGet(keys);
+      const data: Record<string, any> = {};
+      results.forEach(([key, value]) => { if (value) data[key] = JSON.parse(value); });
+
+      if (data['@uf/tasks']) setTasks(data['@uf/tasks']);
+      if (data['@uf/msgs']) setMessages(data['@uf/msgs']);
+      if (data['@uf/stats']) {
+        const savedStats = data['@uf/stats'];
+        // Check for comeback
+        if (savedStats.lastActiveDate !== new Date().toDateString()) {
+          savedStats.daysActive += 1;
+          savedStats.lastActiveDate = new Date().toDateString();
+        }
+        setStats(savedStats);
+      }
+      if (data['@uf/ach']) setAchievements(data['@uf/ach']);
+      if (data['@uf/memory']) setNeroMemory(data['@uf/memory']);
+      if (data['@uf/contexts']) setSavedContexts(data['@uf/contexts']);
+      if (data['@uf/thoughts']) setThoughtDumps(data['@uf/thoughts']);
+      if (data['@uf/bcs']) setBreadcrumbs(data['@uf/bcs']);
+      if (data['@uf/profile']) {
+        const p = data['@uf/profile'];
+        setUserName(p.name || '');
+        setNeroName(p.nero || 'Nero');
+        setPersonality(p.pers || 'loyalFriend');
+        setApiKey(p.apiKey || '');
+        setThinkingMode(p.thinkingMode || 'minimal');
+      }
+      
+      setScreen(data['@uf/onb'] === true ? 'main' : 'welcome');
+    } catch (e) {
+      console.error('Load error:', e);
+    } finally {
+      setLoading(false);
+    }
   };
-  const save = async (k: string, d: any) => { try { await AsyncStorage.setItem(k, JSON.stringify(d)); } catch (e) {} };
+
+  // Save helpers
+  const save = async (key: string, data: any) => {
+    try { await AsyncStorage.setItem(key, JSON.stringify(data)); } catch (e) { console.error('Save error:', e); }
+  };
+
   useEffect(() => { save('@uf/tasks', tasks); }, [tasks]);
-  useEffect(() => { save('@uf/msgs', messages); }, [messages]);
+  useEffect(() => { save('@uf/msgs', messages.slice(-100)); }, [messages]); // Keep last 100
   useEffect(() => { save('@uf/stats', stats); }, [stats]);
   useEffect(() => { save('@uf/ach', achievements); }, [achievements]);
-  const saveProfile = () => save('@uf/profile', { name: userName, nero: neroName, pers: personality });
+  useEffect(() => { save('@uf/memory', neroMemory); }, [neroMemory]);
+  useEffect(() => { save('@uf/contexts', savedContexts); }, [savedContexts]);
+  useEffect(() => { save('@uf/thoughts', thoughtDumps); }, [thoughtDumps]);
+  useEffect(() => { save('@uf/bcs', breadcrumbs.slice(-20)); }, [breadcrumbs]);
 
-  const checkAch = (ns: typeof stats) => {
-    const conds: Record<string, boolean> = { first_task: ns.tasks >= 1, five_tasks: ns.tasks >= 5, ten_tasks: ns.tasks >= 10, first_chat: ns.msgs >= 1, low_energy_win: ns.lowWins >= 1, micro_win: ns.micro >= 1 };
-    for (const a of ACHIEVEMENTS) {
-      if (conds[a.id] && !achievements.includes(a.id)) {
-        setAchievements(p => [...p, a.id]); setShowAch(a); setStats(s => ({ ...s, pts: s.pts + a.points }));
-        setTimeout(() => setShowAch(null), 3000); break;
+  const saveProfile = () => save('@uf/profile', { name: userName, nero: neroName, pers: personality, apiKey, thinkingMode });
+
+  // Achievement checking
+  const checkAchievements = (newStats: typeof stats) => {
+    const hour = new Date().getHours();
+    const conditions: Record<string, boolean> = {
+      first_task: newStats.tasksCompleted >= 1,
+      five_tasks: newStats.tasksCompleted >= 5,
+      ten_tasks: newStats.tasksCompleted >= 10,
+      twenty_five: newStats.tasksCompleted >= 25,
+      first_chat: newStats.messagesSent >= 1,
+      ten_chats: newStats.messagesSent >= 10,
+      low_energy_win: newStats.lowEnergyWins >= 1,
+      micro_win: newStats.microSteps >= 1,
+      breakdown_master: newStats.tasksBreakdown >= 3,
+      context_keeper: newStats.contextsSaved >= 1,
+      thought_dumper: newStats.thoughtsDumped >= 5,
+      comeback_kid: newStats.daysActive >= 2,
+      early_bird: hour < 9 && newStats.tasksCompleted > 0,
+      night_owl: hour >= 22 && newStats.tasksCompleted > 0,
+    };
+
+    for (const ach of ACHIEVEMENTS) {
+      if (conditions[ach.id] && !achievements.includes(ach.id)) {
+        setAchievements(prev => [...prev, ach.id]);
+        setShowAch(ach);
+        setStats(s => ({ ...s, totalPoints: s.totalPoints + ach.points }));
+        setTimeout(() => setShowAch(null), 3500);
+        break;
       }
     }
   };
 
-  const addTask = () => {
-    if (!newTask.trim()) return;
-    setTasks(p => [{ id: genId(), title: newTask.trim(), energy: newEnergy, completed: false, isMicroStep: false }, ...p]);
-    setNewTask(''); setShowAdd(false);
+  // Add breadcrumb
+  const addBreadcrumb = (text: string) => {
+    const bc: Breadcrumb = { id: genId(), text, timestamp: new Date().toISOString() };
+    setBreadcrumbs(prev => [...prev.slice(-19), bc]);
+  };
+
+  // Task functions
+  const addTask = (title?: string, taskEnergy?: EnergyLevel, isMicro?: boolean, parentId?: string) => {
+    const taskTitle = title || newTask;
+    if (!taskTitle.trim()) return;
+    
+    const task: Task = {
+      id: genId(),
+      title: taskTitle.trim(),
+      energy: taskEnergy || newEnergy,
+      completed: false,
+      isMicroStep: isMicro || false,
+      parentId,
+      createdAt: new Date().toISOString(),
+    };
+    
+    if (parentId) {
+      setTasks(prev => {
+        const idx = prev.findIndex(t => t.id === parentId);
+        const newTasks = [...prev];
+        newTasks.splice(idx + 1, 0, task);
+        return newTasks;
+      });
+    } else {
+      setTasks(prev => [task, ...prev]);
+    }
+    
+    addBreadcrumb(`Added: ${taskTitle.slice(0, 30)}`);
+    if (!title) { setNewTask(''); setShowAdd(false); }
   };
 
   const completeTask = (id: string) => {
-    const t = tasks.find(x => x.id === id); if (!t || t.completed) return;
-    setTasks(p => p.map(x => x.id === id ? { ...x, completed: true } : x));
-    const ns = { ...stats, tasks: stats.tasks + 1, lowWins: energy === 'low' || t.energy === 'low' ? stats.lowWins + 1 : stats.lowWins, micro: t.isMicroStep ? stats.micro + 1 : stats.micro };
-    setStats(ns); checkAch(ns);
-    setCelebText(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]); setShowCeleb(true);
-    Animated.sequence([Animated.timing(celebAnim, { toValue: 1, duration: 300, useNativeDriver: true }), Animated.delay(1200), Animated.timing(celebAnim, { toValue: 0, duration: 300, useNativeDriver: true })]).start(() => setShowCeleb(false));
+    const task = tasks.find(t => t.id === id);
+    if (!task || task.completed) return;
+
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true } : t));
+
+    const newStats = {
+      ...stats,
+      tasksCompleted: stats.tasksCompleted + 1,
+      lowEnergyWins: (energy === 'low' || task.energy === 'low') ? stats.lowEnergyWins + 1 : stats.lowEnergyWins,
+      microSteps: task.isMicroStep ? stats.microSteps + 1 : stats.microSteps,
+    };
+    setStats(newStats);
+    checkAchievements(newStats);
+
+    // Celebration
+    setCelebText(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
+    setShowCeleb(true);
+    Animated.sequence([
+      Animated.timing(celebAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.delay(1500),
+      Animated.timing(celebAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setShowCeleb(false));
+
+    // Surprise reward (10% chance)
+    if (Math.random() < 0.1) {
+      const reward = SURPRISES[Math.floor(Math.random() * SURPRISES.length)];
+      setTimeout(() => {
+        setCelebText(`${reward.emoji} ${reward.msg}`);
+        setShowCeleb(true);
+        Animated.sequence([
+          Animated.timing(celebAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+          Animated.delay(2000),
+          Animated.timing(celebAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        ]).start(() => setShowCeleb(false));
+      }, 2000);
+    }
+
+    addBreadcrumb(`✓ ${task.title.slice(0, 30)}`);
   };
 
-  const breakdown = (id: string) => {
-    const t = tasks.find(x => x.id === id); if (!t) return;
-    const micro: Task[] = [
-      { id: genId(), title: `Open: ${t.title.slice(0, 20)}`, energy: 'low', completed: false, isMicroStep: true },
-      { id: genId(), title: 'Do smallest part', energy: 'low', completed: false, isMicroStep: true },
-      { id: genId(), title: 'Continue 2 min', energy: 'low', completed: false, isMicroStep: true },
+  const breakdownTask = (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+
+    const microSteps = [
+      `Just open/look at: ${task.title.slice(0, 20)}`,
+      `Do the tiniest first part`,
+      `Continue for 2 more minutes`,
     ];
-    setTasks(p => { const i = p.findIndex(x => x.id === id); const n = [...p]; n.splice(i + 1, 0, ...micro); return n; });
+
+    microSteps.forEach((step, i) => {
+      setTimeout(() => addTask(step, 'low', true, id), i * 100);
+    });
+
+    const newStats = { ...stats, tasksBreakdown: stats.tasksBreakdown + 1 };
+    setStats(newStats);
+    checkAchievements(newStats);
+    addBreadcrumb(`🔨 Broke down: ${task.title.slice(0, 25)}`);
   };
 
-  const send = async () => {
+  // Message/Chat functions
+  const sendMessage = async () => {
     if (!input.trim()) return;
-    setMessages(p => [...p, { id: genId(), role: 'user', content: input.trim() }]); setInput(''); setTyping(true);
-    const ns = { ...stats, msgs: stats.msgs + 1 }; setStats(ns); checkAch(ns);
-    const l = input.toLowerCase();
-    if (['tired', 'exhausted', 'low'].some(w => l.includes(w))) setEnergy('low');
-    else if (['great', 'good', 'energized'].some(w => l.includes(w))) setEnergy('high');
-    setTimeout(() => {
-      const resps = [`${PERSONALITIES[personality].greetings[0]} What's the ONE thing to tackle?`, `Got it! What's the smallest first step?`, `No pressure! What's on your mind?`, `You're doing great! 💙`];
-      setMessages(p => [...p, { id: genId(), role: 'nero', content: resps[Math.floor(Math.random() * resps.length)] }]); setTyping(false);
-    }, 1500);
+
+    const userMsg: Message = {
+      id: genId(),
+      role: 'user',
+      content: input.trim(),
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+    const userInput = input;
+    setInput('');
+    setTyping(true);
+    if (thinkingMode !== 'off') setThinkingText('Thinking...');
+
+    // Update stats
+    const newStats = { ...stats, messagesSent: stats.messagesSent + 1 };
+    setStats(newStats);
+    checkAchievements(newStats);
+
+    // Detect energy
+    const detectedEnergy = detectEnergy(userInput);
+    if (detectedEnergy) setEnergy(detectedEnergy);
+
+    // Extract tasks
+    const extracted = extractTasks(userInput);
+    if (extracted.length > 0) {
+      setExtractedTasks(extracted);
+      setShowExtracted(true);
+    }
+
+    addBreadcrumb(`You: ${userInput.slice(0, 35)}`);
+
+    // Get AI response
+    if (thinkingMode === 'full') {
+      setThinkingText('Analyzing your message...');
+      await new Promise(r => setTimeout(r, 500));
+      setThinkingText('Checking your tasks and energy...');
+      await new Promise(r => setTimeout(r, 500));
+      setThinkingText('Crafting response...');
+    }
+
+    const response = await callClaudeAPI(
+      [...messages, userMsg],
+      personality,
+      energy,
+      tasks,
+      neroMemory,
+      apiKey
+    );
+
+    setThinkingText('');
+    setTyping(false);
+
+    const neroMsg: Message = {
+      id: genId(),
+      role: 'nero',
+      content: response.content,
+      model: response.model,
+      thinking: response.thinking,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, neroMsg]);
+    addBreadcrumb(`${neroName}: ${response.content.slice(0, 35)}`);
   };
 
-  const finishOnb = async () => { await AsyncStorage.setItem('@uf/onb', 'true'); saveProfile(); setScreen('main'); setMessages([{ id: genId(), role: 'nero', content: userName ? `${PERSONALITIES[personality].greetings[0]} Great to meet you, ${userName}! I'm ${neroName}.` : `${PERSONALITIES[personality].greetings[0]} I'm ${neroName}, ready to help!` }]); };
+  // Context functions
+  const saveContext = () => {
+    if (!ctxLabel.trim()) return;
+    
+    const ctx: SavedContext = {
+      id: genId(),
+      label: ctxLabel.trim(),
+      tasks: tasks.filter(t => !t.completed).slice(0, 5).map(t => t.title),
+      breadcrumbs: breadcrumbs.slice(-5).map(b => b.text),
+      energy,
+      timestamp: new Date().toISOString(),
+    };
+    
+    setSavedContexts(prev => [ctx, ...prev.slice(0, 9)]); // Keep max 10
+    const newStats = { ...stats, contextsSaved: stats.contextsSaved + 1 };
+    setStats(newStats);
+    checkAchievements(newStats);
+    addBreadcrumb(`📌 Saved: ${ctxLabel}`);
+    setCtxLabel('');
+    setShowCtx(false);
+  };
 
-  if (loading) return <View style={[S.container, S.center]}><Text style={S.loadText}>Loading...</Text></View>;
+  const restoreContext = (ctx: SavedContext) => {
+    if (ctx.energy) setEnergy(ctx.energy);
+    addBreadcrumb(`📌 Restored: ${ctx.label}`);
+    setShowContexts(false);
+    
+    // Add a message about restored context
+    const msg: Message = {
+      id: genId(),
+      role: 'nero',
+      content: `Welcome back! I restored your context: "${ctx.label}". You were working on: ${ctx.tasks.slice(0, 2).join(', ') || 'nothing specific'}. Ready to continue?`,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, msg]);
+  };
 
+  // Thought dump
+  const dumpThought = () => {
+    if (!thought.trim()) return;
+    
+    const dump: ThoughtDump = {
+      id: genId(),
+      text: thought.trim(),
+      timestamp: new Date().toISOString(),
+      processed: false,
+    };
+    
+    setThoughtDumps(prev => [dump, ...prev]);
+    const newStats = { ...stats, thoughtsDumped: stats.thoughtsDumped + 1 };
+    setStats(newStats);
+    checkAchievements(newStats);
+    addBreadcrumb(`💭 ${thought.slice(0, 30)}`);
+    setThought('');
+    setShowThought(false);
+  };
+
+  // Voice input (simulated for web)
+  const startVoiceInput = () => {
+    setListening(true);
+    // Simulated voice - in real app would use expo-speech
+    setTimeout(() => {
+      setInput("I need to finish that report today");
+      setListening(false);
+    }, 2000);
+  };
+
+  // Onboarding complete
+  const finishOnboarding = async () => {
+    await AsyncStorage.setItem('@uf/onb', JSON.stringify(true));
+    saveProfile();
+    setScreen('main');
+    
+    const greeting = PERSONALITIES[personality].greetings[Math.floor(Math.random() * PERSONALITIES[personality].greetings.length)];
+    const welcomeMsg: Message = {
+      id: genId(),
+      role: 'nero',
+      content: userName 
+        ? `${greeting} Great to meet you, ${userName}! I'm ${neroName}, your ADHD companion. What's on your mind?`
+        : `${greeting} I'm ${neroName}, your ADHD companion. Ready to help whenever you are!`,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages([welcomeMsg]);
+  };
+
+  // ========== RENDER ==========
+
+  if (loading) {
+    return (
+      <View style={[S.container, S.center]}>
+        <ActivityIndicator size="large" color={C.primary} />
+        <Text style={S.loadText}>Loading UnFocused...</Text>
+      </View>
+    );
+  }
+
+  // WELCOME SCREEN
   if (screen === 'welcome') {
     return (
-      <SafeAreaView style={S.container}><StatusBar style="light" />
+      <SafeAreaView style={S.container}>
+        <StatusBar style="light" />
         <View style={S.welcomeC}>
-          <Text style={S.logo}>🧠</Text><Text style={S.title}>UnFocused</Text><Text style={S.subtitle}>Your AI Companion for the ADHD Brain</Text>
+          <Text style={S.logo}>🧠</Text>
+          <Text style={S.title}>UnFocused</Text>
+          <Text style={S.subtitle}>Your AI Companion for the ADHD Brain</Text>
+          
           <View style={S.card}>
             <Text style={S.cardQ}>How much do you want to tell me?</Text>
-            {[{ k: 'skip', e: '🚀', t: "Let's start", d: "I'll learn as we go" }, { k: 'quick', e: '💬', t: 'Quick questions', d: '~1 min' }, { k: 'deep', e: '🎯', t: 'Deep dive', d: 'Full setup' }].map(o => (
-              <TouchableOpacity key={o.k} style={S.opt} onPress={() => o.k === 'skip' ? finishOnb() : setScreen('onboarding')}>
-                <Text style={S.optE}>{o.e}</Text><View style={{ flex: 1 }}><Text style={S.optT}>{o.t}</Text><Text style={S.optD}>{o.d}</Text></View>
+            
+            {[
+              { k: 'skip', e: '🚀', t: "Let's just start", d: "I'll learn as we go" },
+              { k: 'quick', e: '💬', t: 'A few quick questions', d: '~1 minute setup' },
+              { k: 'deep', e: '🎯', t: 'Deep dive', d: 'Hit the ground running' },
+            ].map(o => (
+              <TouchableOpacity 
+                key={o.k} 
+                style={S.opt}
+                onPress={() => {
+                  if (o.k === 'skip') finishOnboarding();
+                  else { setOnbStep(0); setScreen('onboarding'); }
+                }}
+              >
+                <Text style={S.optE}>{o.e}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.optT}>{o.t}</Text>
+                  <Text style={S.optD}>{o.d}</Text>
+                </View>
               </TouchableOpacity>
             ))}
           </View>
@@ -145,105 +676,946 @@ export default function App() {
     );
   }
 
+  // ONBOARDING SCREEN
   if (screen === 'onboarding') {
-    const qs = [{ q: "What should I call you?", t: 'name' }, { q: "How should I talk to you?", t: 'pers' }];
-    const cur = qs[onbStep];
+    const questions = [
+      { q: "What should I call you?", type: 'name' },
+      { q: "What's your biggest ADHD struggle?", type: 'struggle' },
+      { q: "When do you usually have the most energy?", type: 'energy' },
+      { q: "How should I talk to you?", type: 'personality' },
+    ];
+    const current = questions[onbStep];
+
     return (
-      <SafeAreaView style={S.container}><StatusBar style="light" />
+      <SafeAreaView style={S.container}>
+        <StatusBar style="light" />
         <View style={S.onbC}>
-          <View style={S.prog}><View style={[S.progFill, { width: `${((onbStep + 1) / qs.length) * 100}%` }]} /></View>
-          <Text style={S.onbQ}>{cur.q}</Text>
-          {cur.t === 'name' && <TextInput style={S.onbIn} value={userName} onChangeText={setUserName} placeholder="Your name (optional)" placeholderTextColor={C.textMuted} />}
-          {cur.t === 'pers' && Object.entries(PERSONALITIES).slice(0, 3).map(([k, v]) => <TouchableOpacity key={k} style={[S.onbOpt, personality === k && S.onbOptSel]} onPress={() => setPersonality(k as Personality)}><Text style={S.onbOptT}>{v.emoji} {v.name}</Text></TouchableOpacity>)}
-          <View style={S.onbBtns}>
-            {onbStep > 0 && <TouchableOpacity style={S.backBtn} onPress={() => setOnbStep(s => s - 1)}><Text style={S.backBtnT}>← Back</Text></TouchableOpacity>}
-            <TouchableOpacity style={S.nextBtn} onPress={() => onbStep < qs.length - 1 ? setOnbStep(s => s + 1) : finishOnb()}><Text style={S.nextBtnT}>{onbStep === qs.length - 1 ? "Let's go! 🚀" : 'Continue'}</Text></TouchableOpacity>
+          <View style={S.prog}>
+            <View style={[S.progFill, { width: `${((onbStep + 1) / questions.length) * 100}%` }]} />
           </View>
-          <TouchableOpacity style={S.skipBtn} onPress={finishOnb}><Text style={S.skipBtnT}>Skip</Text></TouchableOpacity>
+
+          <Text style={S.onbQ}>{current.q}</Text>
+
+          {current.type === 'name' && (
+            <TextInput
+              style={S.onbIn}
+              value={userName}
+              onChangeText={setUserName}
+              placeholder="Your name (optional)"
+              placeholderTextColor={C.textMuted}
+              autoFocus
+            />
+          )}
+
+          {current.type === 'struggle' && (
+            <View style={S.optsCol}>
+              {['Starting tasks', 'Staying focused', 'Remembering things', 'Time management'].map(opt => (
+                <TouchableOpacity key={opt} style={S.onbOpt} onPress={() => setOnbStep(s => s + 1)}>
+                  <Text style={S.onbOptT}>{opt}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {current.type === 'energy' && (
+            <View style={S.optsCol}>
+              {['Morning ☀️', 'Afternoon 🌤️', 'Evening 🌙', 'Unpredictable 🎲'].map(opt => (
+                <TouchableOpacity key={opt} style={S.onbOpt} onPress={() => setOnbStep(s => s + 1)}>
+                  <Text style={S.onbOptT}>{opt}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {current.type === 'personality' && (
+            <View style={S.optsCol}>
+              {Object.entries(PERSONALITIES).slice(0, 4).map(([key, val]) => (
+                <TouchableOpacity 
+                  key={key}
+                  style={[S.onbOpt, personality === key && S.onbOptSel]}
+                  onPress={() => setPersonality(key as Personality)}
+                >
+                  <Text style={S.onbOptT}>{val.emoji} {val.name}</Text>
+                  <Text style={S.onbOptD}>{val.desc}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <View style={S.onbBtns}>
+            {onbStep > 0 && (
+              <TouchableOpacity style={S.backBtn} onPress={() => setOnbStep(s => s - 1)}>
+                <Text style={S.backBtnT}>← Back</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity 
+              style={S.nextBtn}
+              onPress={() => {
+                if (onbStep < questions.length - 1) setOnbStep(s => s + 1);
+                else finishOnboarding();
+              }}
+            >
+              <Text style={S.nextBtnT}>
+                {onbStep === questions.length - 1 ? "Let's go! 🚀" : 'Continue'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={S.skipBtn} onPress={finishOnboarding}>
+            <Text style={S.skipBtnT}>Skip for now</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
+  // SETTINGS SCREEN
   if (screen === 'settings') {
     return (
-      <SafeAreaView style={S.container}><StatusBar style="light" />
-        <View style={S.setHead}><TouchableOpacity onPress={() => setScreen('main')}><Text style={S.setBack}>← Back</Text></TouchableOpacity><Text style={S.setTitle}>Settings</Text><View style={{ width: 50 }} /></View>
+      <SafeAreaView style={S.container}>
+        <StatusBar style="light" />
+        <View style={S.setHead}>
+          <TouchableOpacity onPress={() => { saveProfile(); setScreen('main'); }}>
+            <Text style={S.setBack}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={S.setTitle}>Settings</Text>
+          <View style={{ width: 50 }} />
+        </View>
+
         <ScrollView style={S.setCont}>
-          <View style={S.setSec}><Text style={S.setSecT}>{neroName}'s Personality</Text>
-            {Object.entries(PERSONALITIES).map(([k, v]) => <TouchableOpacity key={k} style={[S.setOpt, personality === k && S.setOptSel]} onPress={() => { setPersonality(k as Personality); saveProfile(); }}><Text style={S.setOptE}>{v.emoji}</Text><Text style={S.setOptT}>{v.name}</Text>{personality === k && <Text style={S.check}>✓</Text>}</TouchableOpacity>)}
+          {/* Personality */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>{neroName}'s Personality</Text>
+            {Object.entries(PERSONALITIES).map(([key, val]) => (
+              <TouchableOpacity 
+                key={key}
+                style={[S.setOpt, personality === key && S.setOptSel]}
+                onPress={() => setPersonality(key as Personality)}
+              >
+                <Text style={S.setOptE}>{val.emoji}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.setOptT}>{val.name}</Text>
+                  <Text style={S.setOptD}>{val.desc}</Text>
+                </View>
+                {personality === key && <Text style={S.check}>✓</Text>}
+              </TouchableOpacity>
+            ))}
           </View>
-          <View style={S.setSec}><Text style={S.setSecT}>Stats</Text>
-            <View style={S.statsG}><View style={S.statI}><Text style={S.statV}>{stats.tasks}</Text><Text style={S.statL}>Tasks</Text></View><View style={S.statI}><Text style={S.statV}>{stats.pts}</Text><Text style={S.statL}>Points</Text></View><View style={S.statI}><Text style={S.statV}>{achievements.length}/{ACHIEVEMENTS.length}</Text><Text style={S.statL}>Achievements</Text></View></View>
+
+          {/* Companion Name */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>Companion Name</Text>
+            <TextInput
+              style={S.setIn}
+              value={neroName}
+              onChangeText={setNeroName}
+              placeholder="AI companion name"
+              placeholderTextColor={C.textMuted}
+            />
           </View>
+
+          {/* API Key */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>Claude API Key (Optional)</Text>
+            <Text style={[S.setOptD, { marginBottom: 8 }]}>For smarter responses. Leave empty for basic mode.</Text>
+            <TextInput
+              style={S.setIn}
+              value={apiKey}
+              onChangeText={setApiKey}
+              placeholder="sk-ant-..."
+              placeholderTextColor={C.textMuted}
+              secureTextEntry
+            />
+          </View>
+
+          {/* Thinking Mode */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>AI Thinking Display</Text>
+            {(['off', 'minimal', 'full'] as ThinkingMode[]).map(mode => (
+              <TouchableOpacity 
+                key={mode}
+                style={[S.setOpt, thinkingMode === mode && S.setOptSel]}
+                onPress={() => setThinkingMode(mode)}
+              >
+                <Text style={S.setOptT}>{mode.charAt(0).toUpperCase() + mode.slice(1)}</Text>
+                {thinkingMode === mode && <Text style={S.check}>✓</Text>}
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Stats */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>Your Stats</Text>
+            <View style={S.statsG}>
+              <View style={S.statI}><Text style={S.statV}>{stats.tasksCompleted}</Text><Text style={S.statL}>Tasks Done</Text></View>
+              <View style={S.statI}><Text style={S.statV}>{stats.messagesSent}</Text><Text style={S.statL}>Messages</Text></View>
+              <View style={S.statI}><Text style={S.statV}>{stats.totalPoints}</Text><Text style={S.statL}>Points</Text></View>
+              <View style={S.statI}><Text style={S.statV}>{stats.daysActive}</Text><Text style={S.statL}>Days Active</Text></View>
+            </View>
+          </View>
+
+          {/* Achievements Preview */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>Achievements ({achievements.length}/{ACHIEVEMENTS.length})</Text>
+            <View style={S.achRow}>
+              {ACHIEVEMENTS.slice(0, 6).map(a => (
+                <View key={a.id} style={[S.achMini, !achievements.includes(a.id) && S.achLocked]}>
+                  <Text style={S.achMiniE}>{achievements.includes(a.id) ? a.emoji : '🔒'}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* Data Management */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>Data</Text>
+            <TouchableOpacity style={S.dangerBtn} onPress={async () => {
+              await AsyncStorage.clear();
+              setScreen('welcome');
+            }}>
+              <Text style={S.dangerBtnT}>Reset All Data</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ height: 50 }} />
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  const pending = tasks.filter(t => !t.completed);
-  const filtered = filter === 'all' ? pending : pending.filter(t => t.energy === filter);
-  const next = pending[0];
+  // ========== MAIN APP ==========
+  const pendingTasks = tasks.filter(t => !t.completed);
+  const filteredTasks = filter === 'all' ? pendingTasks : pendingTasks.filter(t => t.energy === filter);
+  const nextTask = pendingTasks[0];
+  const completedToday = tasks.filter(t => t.completed && new Date(t.createdAt).toDateString() === new Date().toDateString()).length;
 
   return (
-    <SafeAreaView style={S.container}><StatusBar style="light" />
+    <SafeAreaView style={S.container}>
+      <StatusBar style="light" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={S.head}><View style={S.headL}><Text style={S.headT}>{neroName}</Text>{energy && <View style={[S.eBadge, { backgroundColor: getEC(energy) }]}><Text style={S.eBadgeT}>{getEE(energy)} {energy}</Text></View>}</View><TouchableOpacity onPress={() => setScreen('settings')}><Text style={S.setIcon}>⚙️</Text></TouchableOpacity></View>
-        {!energy && <View style={S.eSel}><Text style={S.eSelT}>How's your energy?</Text><View style={S.eOpts}>{(['low', 'medium', 'high'] as EnergyLevel[]).map(e => <TouchableOpacity key={e} style={[S.eOpt, { borderColor: getEC(e) }]} onPress={() => setEnergy(e)}><Text style={S.eOptT}>{getEE(e)} {e}</Text></TouchableOpacity>)}</View></View>}
-        <View style={S.main}>
-          {view === 'conversation' && <>
-            <ScrollView ref={scrollRef} style={S.msgs} onContentSizeChange={() => scrollRef.current?.scrollToEnd()}>
-              {messages.map(m => <View key={m.id} style={[S.msg, m.role === 'user' ? S.msgU : S.msgN]}><Text style={S.msgT}>{m.content}</Text></View>)}
-              {typing && <View style={[S.msg, S.msgN]}><Text style={S.msgT}>...</Text></View>}
-            </ScrollView>
-            <View style={S.inC}><View style={S.inR}><TextInput style={S.tIn} value={input} onChangeText={setInput} placeholder={`Talk to ${neroName}...`} placeholderTextColor={C.textMuted} multiline /><TouchableOpacity style={S.sendBtn} onPress={send}><Text style={S.sendBtnT}>→</Text></TouchableOpacity></View></View>
-          </>}
-          {view === 'oneThing' && <View style={S.oneC}>{next ? <><Text style={S.oneL}>Your ONE thing:</Text><View style={S.oneCard}><View style={[S.eDot, { backgroundColor: getEC(next.energy) }]} /><Text style={S.oneT}>{next.title}</Text>{next.isMicroStep && <Text style={S.microB}>✨ micro</Text>}</View><View style={S.oneActs}><TouchableOpacity style={S.oneDone} onPress={() => completeTask(next.id)}><Text style={S.oneDoneT}>✓ Done!</Text></TouchableOpacity><TouchableOpacity style={S.oneBreak} onPress={() => breakdown(next.id)}><Text style={S.oneBreakT}>🔨 Break it down</Text></TouchableOpacity></View></> : <View style={S.empty}><Text style={S.emptyE}>🎉</Text><Text style={S.emptyT}>All clear!</Text><TouchableOpacity style={S.addTaskBtn} onPress={() => setShowAdd(true)}><Text style={S.addTaskBtnT}>+ Add Task</Text></TouchableOpacity></View>}</View>}
-          {view === 'list' && <View style={S.listC}><View style={S.listH}><Text style={S.listT}>Tasks ({filtered.length})</Text><TouchableOpacity style={S.addBtn} onPress={() => setShowAdd(true)}><Text style={S.addBtnT}>+ Add</Text></TouchableOpacity></View><View style={S.filterR}>{(['all', 'low', 'medium', 'high'] as const).map(f => <TouchableOpacity key={f} style={[S.filterBtn, filter === f && S.filterBtnA]} onPress={() => setFilter(f)}><Text style={[S.filterBtnT, filter === f && S.filterBtnTA]}>{f === 'all' ? 'All' : getEE(f)}</Text></TouchableOpacity>)}</View><ScrollView style={S.taskList}>{filtered.map(t => <View key={t.id} style={S.taskI}><TouchableOpacity style={[S.chk, t.completed && S.chkD]} onPress={() => completeTask(t.id)}>{t.completed && <Text>✓</Text>}</TouchableOpacity><View style={[S.taskE, { backgroundColor: getEC(t.energy) }]} /><Text style={[S.taskT, t.completed && S.taskTD]}>{t.title}</Text><TouchableOpacity onPress={() => breakdown(t.id)}><Text style={S.taskA}>🔨</Text></TouchableOpacity><TouchableOpacity onPress={() => setTasks(p => p.filter(x => x.id !== t.id))}><Text style={S.taskA}>🗑️</Text></TouchableOpacity></View>)}</ScrollView></View>}
-          {view === 'timeline' && <ScrollView style={S.timeC}><Text style={S.timeT}>Timeline</Text>{[8,9,10,11,12,13,14,15,16,17,18,19].map(h => <View key={h} style={S.timeH}><Text style={S.timeTm}>{h > 12 ? `${h-12}PM` : `${h}AM`}</Text><View style={S.timeSlot}>{h === new Date().getHours() && <View style={S.curLine} />}</View></View>)}</ScrollView>}
-          {view === 'dashboard' && <ScrollView style={S.dashC}><Text style={S.dashT}>Progress</Text><View style={S.dashStats}><View style={S.dashS}><Text style={S.dashSV}>{stats.tasks}</Text><Text style={S.dashSL}>Tasks</Text></View><View style={S.dashS}><Text style={S.dashSV}>{stats.pts}</Text><Text style={S.dashSL}>Points</Text></View></View><Text style={S.achT}>Achievements ({achievements.length}/{ACHIEVEMENTS.length})</Text><View style={S.achG}>{ACHIEVEMENTS.map(a => { const u = achievements.includes(a.id); return <View key={a.id} style={[S.achI, !u && S.achIL]}><Text style={S.achE}>{u ? a.emoji : '🔒'}</Text><Text style={S.achN}>{a.name}</Text></View>; })}</View></ScrollView>}
-          {view === 'minimal' && <View style={S.minC}><Text style={S.minG}>Hey{userName ? `, ${userName}` : ''} 💙</Text><Text style={S.minM}>One tiny thing when ready.</Text>{next && <TouchableOpacity style={S.minTask} onPress={() => completeTask(next.id)}><Text style={S.minTaskT}>{next.title}</Text></TouchableOpacity>}</View>}
+        
+        {/* HEADER */}
+        <View style={S.head}>
+          <View style={S.headL}>
+            <Text style={S.headT}>{neroName}</Text>
+            {energy && (
+              <View style={[S.eBadge, { backgroundColor: getEC(energy) }]}>
+                <Text style={S.eBadgeT}>{getEE(energy)} {energy}</Text>
+              </View>
+            )}
+          </View>
+          <View style={S.headR}>
+            <TouchableOpacity style={S.headBtn} onPress={() => setShowContexts(true)}>
+              <Text>📌</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={S.headBtn} onPress={() => setScreen('settings')}>
+              <Text>⚙️</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={S.nav}>{Object.entries(VIEWS).map(([k, v]) => <TouchableOpacity key={k} style={S.navI} onPress={() => setView(k as ViewMode)}><Text style={S.navE}>{v.emoji}</Text><Text style={[S.navL, view === k && S.navLA]}>{v.name}</Text></TouchableOpacity>)}</View>
-        <Modal visible={showAdd} transparent animationType="slide"><View style={S.mO}><View style={S.mC}><Text style={S.mT}>Add Task</Text><TextInput style={S.mIn} value={newTask} onChangeText={setNewTask} placeholder="What needs doing?" placeholderTextColor={C.textMuted} autoFocus /><Text style={S.mL}>Energy:</Text><View style={S.ePick}>{(['low', 'medium', 'high'] as EnergyLevel[]).map(e => <TouchableOpacity key={e} style={[S.ePickO, newEnergy === e && { borderColor: getEC(e), backgroundColor: getEC(e) + '20' }]} onPress={() => setNewEnergy(e)}><Text style={S.ePickT}>{getEE(e)}</Text></TouchableOpacity>)}</View><View style={S.mBtns}><TouchableOpacity style={S.mCancel} onPress={() => setShowAdd(false)}><Text style={S.mCancelT}>Cancel</Text></TouchableOpacity><TouchableOpacity style={S.mConfirm} onPress={addTask}><Text style={S.mConfirmT}>Add</Text></TouchableOpacity></View></View></View></Modal>
-        {showCeleb && <Animated.View style={[S.celebO, { opacity: celebAnim, transform: [{ scale: celebAnim }] }]}><Text style={S.celebT}>{celebText}</Text></Animated.View>}
-        {showAch && <View style={S.achToast}><Text style={S.achToastE}>{showAch.emoji}</Text><Text style={S.achToastN}>{showAch.name}</Text><Text style={S.achToastP}>+{showAch.points}</Text></View>}
+
+        {/* ENERGY SELECTOR */}
+        {!energy && (
+          <View style={S.eSel}>
+            <Text style={S.eSelT}>How's your energy right now?</Text>
+            <View style={S.eOpts}>
+              {(['low', 'medium', 'high'] as EnergyLevel[]).map(e => (
+                <TouchableOpacity
+                  key={e}
+                  style={[S.eOpt, { borderColor: getEC(e) }]}
+                  onPress={() => setEnergy(e)}
+                >
+                  <Text style={S.eOptT}>{getEE(e)} {e}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* BREADCRUMBS */}
+        {breadcrumbs.length > 0 && view !== 'minimal' && (
+          <ScrollView horizontal style={S.bcs} showsHorizontalScrollIndicator={false}>
+            {breadcrumbs.slice(-5).map(bc => (
+              <View key={bc.id} style={S.bc}>
+                <Text style={S.bcT}>{bc.text}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* MAIN CONTENT */}
+        <View style={S.main}>
+          
+          {/* CONVERSATION VIEW */}
+          {view === 'conversation' && (
+            <>
+              <ScrollView 
+                ref={scrollRef}
+                style={S.msgs}
+                onContentSizeChange={() => scrollRef.current?.scrollToEnd()}
+              >
+                {messages.map(msg => (
+                  <View key={msg.id} style={[S.msg, msg.role === 'user' ? S.msgU : S.msgN]}>
+                    <Text style={S.msgT}>{msg.content}</Text>
+                    {msg.model && thinkingMode !== 'off' && (
+                      <Text style={S.modelBadge}>
+                        {msg.model === 'claude-sonnet' ? '🧠' : msg.model === 'local' ? '💭' : '⚡'}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+                {typing && (
+                  <View style={[S.msg, S.msgN]}>
+                    <Text style={S.msgT}>{thinkingText || '...'}</Text>
+                  </View>
+                )}
+              </ScrollView>
+
+              <View style={S.inC}>
+                <View style={S.inR}>
+                  <TouchableOpacity 
+                    style={[S.iconBtn, listening && S.iconBtnA]}
+                    onPress={startVoiceInput}
+                  >
+                    <Text>{listening ? '🔴' : '🎤'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.iconBtn} onPress={() => setShowThought(true)}>
+                    <Text>💭</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.iconBtn} onPress={() => setShowCtx(true)}>
+                    <Text>📌</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={S.tIn}
+                    value={input}
+                    onChangeText={setInput}
+                    placeholder={`Talk to ${neroName}...`}
+                    placeholderTextColor={C.textMuted}
+                    multiline
+                    onSubmitEditing={sendMessage}
+                  />
+                  <TouchableOpacity style={S.sendBtn} onPress={sendMessage} disabled={typing}>
+                    <Text style={S.sendBtnT}>{typing ? '...' : '→'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
+          )}
+
+          {/* ONE THING VIEW */}
+          {view === 'oneThing' && (
+            <View style={S.oneC}>
+              {nextTask ? (
+                <>
+                  <Text style={S.oneL}>Your ONE thing right now:</Text>
+                  <View style={S.oneCard}>
+                    <View style={[S.eDot, { backgroundColor: getEC(nextTask.energy) }]} />
+                    <Text style={S.oneT}>{nextTask.title}</Text>
+                    {nextTask.isMicroStep && <Text style={S.microB}>✨ micro-step</Text>}
+                  </View>
+                  
+                  <View style={S.oneActs}>
+                    <TouchableOpacity style={S.oneDone} onPress={() => completeTask(nextTask.id)}>
+                      <Text style={S.oneDoneT}>✓ Done!</Text>
+                    </TouchableOpacity>
+                    {!nextTask.isMicroStep && (
+                      <TouchableOpacity style={S.oneBreak} onPress={() => breakdownTask(nextTask.id)}>
+                        <Text style={S.oneBreakT}>🔨 Too big? Break it down</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  <View style={S.microStarts}>
+                    <Text style={S.microStartsT}>Tiny starts:</Text>
+                    {MICRO_STARTS.slice(0, 3).map((start, i) => (
+                      <TouchableOpacity key={i} style={S.microStartO}>
+                        <Text style={S.microStartT}>{start}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <View style={S.empty}>
+                  <Text style={S.emptyE}>🎉</Text>
+                  <Text style={S.emptyT}>All clear! You crushed it.</Text>
+                  <Text style={S.emptyS}>Add a task when you're ready.</Text>
+                  <TouchableOpacity style={S.addTaskBtn} onPress={() => setShowAdd(true)}>
+                    <Text style={S.addTaskBtnT}>+ Add Task</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* LIST VIEW */}
+          {view === 'list' && (
+            <View style={S.listC}>
+              <View style={S.listH}>
+                <Text style={S.listT}>Tasks ({filteredTasks.length})</Text>
+                <TouchableOpacity style={S.addBtn} onPress={() => setShowAdd(true)}>
+                  <Text style={S.addBtnT}>+ Add</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <View style={S.filterR}>
+                {(['all', 'low', 'medium', 'high'] as const).map(f => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[S.filterBtn, filter === f && S.filterBtnA]}
+                    onPress={() => setFilter(f)}
+                  >
+                    <Text style={[S.filterBtnT, filter === f && S.filterBtnTA]}>
+                      {f === 'all' ? 'All' : getEE(f)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <ScrollView style={S.taskList}>
+                {filteredTasks.map(task => (
+                  <View key={task.id} style={[S.taskI, task.isMicroStep && S.taskIMicro]}>
+                    <TouchableOpacity 
+                      style={[S.chk, task.completed && S.chkD]}
+                      onPress={() => completeTask(task.id)}
+                    >
+                      {task.completed && <Text style={S.chkT}>✓</Text>}
+                    </TouchableOpacity>
+                    <View style={[S.taskE, { backgroundColor: getEC(task.energy) }]} />
+                    <Text style={[S.taskT, task.completed && S.taskTD]} numberOfLines={2}>
+                      {task.title}
+                    </Text>
+                    {task.isMicroStep && <Text style={S.microL}>✨</Text>}
+                    {!task.isMicroStep && (
+                      <TouchableOpacity onPress={() => breakdownTask(task.id)}>
+                        <Text style={S.taskA}>🔨</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => setTasks(p => p.filter(t => t.id !== task.id))}>
+                      <Text style={S.taskA}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {filteredTasks.length === 0 && (
+                  <View style={S.emptyList}>
+                    <Text style={S.emptyListT}>No tasks here! 🎉</Text>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* TIMELINE VIEW */}
+          {view === 'timeline' && (
+            <ScrollView style={S.timeC}>
+              <Text style={S.timeTitle}>Today's Flow</Text>
+              <Text style={S.timeSubtitle}>{completedToday} tasks completed today</Text>
+              
+              {[6, 8, 10, 12, 14, 16, 18, 20, 22].map(hour => {
+                const isNow = new Date().getHours() === hour;
+                const isPast = new Date().getHours() > hour;
+                return (
+                  <View key={hour} style={S.timeH}>
+                    <Text style={[S.timeTm, isPast && S.timeTmPast]}>
+                      {hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`}
+                    </Text>
+                    <View style={[S.timeSlot, isNow && S.timeSlotNow]}>
+                      {isNow && <View style={S.curLine} />}
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* DASHBOARD VIEW */}
+          {view === 'dashboard' && (
+            <ScrollView style={S.dashC}>
+              <Text style={S.dashT}>Your Progress</Text>
+              
+              <View style={S.dashStats}>
+                <View style={S.dashS}>
+                  <Text style={S.dashSV}>{stats.tasksCompleted}</Text>
+                  <Text style={S.dashSL}>Tasks Done</Text>
+                </View>
+                <View style={S.dashS}>
+                  <Text style={S.dashSV}>{stats.totalPoints}</Text>
+                  <Text style={S.dashSL}>Points</Text>
+                </View>
+                <View style={S.dashS}>
+                  <Text style={S.dashSV}>{stats.lowEnergyWins}</Text>
+                  <Text style={S.dashSL}>Low E Wins</Text>
+                </View>
+              </View>
+
+              <View style={S.dashStats}>
+                <View style={S.dashS}>
+                  <Text style={S.dashSV}>{stats.daysActive}</Text>
+                  <Text style={S.dashSL}>Days Active</Text>
+                </View>
+                <View style={S.dashS}>
+                  <Text style={S.dashSV}>{stats.tasksBreakdown}</Text>
+                  <Text style={S.dashSL}>Breakdowns</Text>
+                </View>
+                <View style={S.dashS}>
+                  <Text style={S.dashSV}>{completedToday}</Text>
+                  <Text style={S.dashSL}>Today</Text>
+                </View>
+              </View>
+
+              <Text style={S.achT}>Achievements ({achievements.length}/{ACHIEVEMENTS.length})</Text>
+              <View style={S.achG}>
+                {ACHIEVEMENTS.map(a => {
+                  const unlocked = achievements.includes(a.id);
+                  return (
+                    <View key={a.id} style={[S.achI, !unlocked && S.achIL]}>
+                      <Text style={S.achE}>{unlocked ? a.emoji : '🔒'}</Text>
+                      <Text style={S.achN}>{a.name}</Text>
+                      <Text style={S.achP}>{a.points} pts</Text>
+                    </View>
+                  );
+                })}
+              </View>
+
+              {thoughtDumps.length > 0 && (
+                <>
+                  <Text style={[S.achT, { marginTop: 24 }]}>Recent Thoughts ({thoughtDumps.length})</Text>
+                  {thoughtDumps.slice(0, 5).map(t => (
+                    <View key={t.id} style={S.thoughtI}>
+                      <Text style={S.thoughtT}>{t.text}</Text>
+                      <Text style={S.thoughtD}>{formatDate(new Date(t.timestamp))}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+            </ScrollView>
+          )}
+
+          {/* MINIMAL VIEW */}
+          {view === 'minimal' && (
+            <View style={S.minC}>
+              <Text style={S.minG}>Hey{userName ? `, ${userName}` : ''} 💙</Text>
+              <Text style={S.minM}>Take it easy. One tiny thing when you're ready.</Text>
+              
+              {nextTask && (
+                <TouchableOpacity style={S.minTask} onPress={() => completeTask(nextTask.id)}>
+                  <Text style={S.minTaskT}>{nextTask.title}</Text>
+                  <Text style={S.minTaskH}>Tap when done</Text>
+                </TouchableOpacity>
+              )}
+              
+              <TouchableOpacity style={S.minEnergy} onPress={() => setEnergy(null)}>
+                <Text style={S.minEnergyT}>Change energy</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* BOTTOM NAV */}
+        <View style={S.nav}>
+          {Object.entries(VIEWS).map(([key, val]) => (
+            <TouchableOpacity
+              key={key}
+              style={[S.navI, view === key && S.navIA]}
+              onPress={() => setView(key as ViewMode)}
+            >
+              <Text style={S.navE}>{val.emoji}</Text>
+              <Text style={[S.navL, view === key && S.navLA]}>{val.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ========== MODALS ========== */}
+
+        {/* Add Task Modal */}
+        <Modal visible={showAdd} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={S.mC}>
+              <Text style={S.mT}>Add Task</Text>
+              <TextInput
+                style={S.mIn}
+                value={newTask}
+                onChangeText={setNewTask}
+                placeholder="What needs to be done?"
+                placeholderTextColor={C.textMuted}
+                autoFocus
+              />
+              <Text style={S.mL}>Energy needed:</Text>
+              <View style={S.ePick}>
+                {(['low', 'medium', 'high'] as EnergyLevel[]).map(e => (
+                  <TouchableOpacity
+                    key={e}
+                    style={[S.ePickO, newEnergy === e && { borderColor: getEC(e), backgroundColor: getEC(e) + '20' }]}
+                    onPress={() => setNewEnergy(e)}
+                  >
+                    <Text style={S.ePickT}>{getEE(e)} {e}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={S.mBtns}>
+                <TouchableOpacity style={S.mCancel} onPress={() => setShowAdd(false)}>
+                  <Text style={S.mCancelT}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={S.mConfirm} onPress={() => addTask()}>
+                  <Text style={S.mConfirmT}>Add Task</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Thought Dump Modal */}
+        <Modal visible={showThought} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={S.mC}>
+              <Text style={S.mT}>💭 Quick Thought Dump</Text>
+              <Text style={S.mSub}>Get it out of your head. Organize later (or never).</Text>
+              <TextInput
+                style={[S.mIn, { height: 120, textAlignVertical: 'top' }]}
+                value={thought}
+                onChangeText={setThought}
+                placeholder="Whatever's on your mind..."
+                placeholderTextColor={C.textMuted}
+                multiline
+                autoFocus
+              />
+              <View style={S.mBtns}>
+                <TouchableOpacity style={S.mCancel} onPress={() => setShowThought(false)}>
+                  <Text style={S.mCancelT}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={S.mConfirm} onPress={dumpThought}>
+                  <Text style={S.mConfirmT}>Dump It!</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Save Context Modal */}
+        <Modal visible={showCtx} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={S.mC}>
+              <Text style={S.mT}>📌 Save Your Place</Text>
+              <Text style={S.mSub}>Bookmark where you are so you can come back later.</Text>
+              <TextInput
+                style={S.mIn}
+                value={ctxLabel}
+                onChangeText={setCtxLabel}
+                placeholder="What were you working on?"
+                placeholderTextColor={C.textMuted}
+                autoFocus
+              />
+              <View style={S.mBtns}>
+                <TouchableOpacity style={S.mCancel} onPress={() => setShowCtx(false)}>
+                  <Text style={S.mCancelT}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={S.mConfirm} onPress={saveContext}>
+                  <Text style={S.mConfirmT}>Save Context</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Saved Contexts Modal */}
+        <Modal visible={showContexts} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={[S.mC, { maxHeight: '80%' }]}>
+              <Text style={S.mT}>📌 Saved Contexts</Text>
+              <ScrollView style={{ maxHeight: 400 }}>
+                {savedContexts.length === 0 ? (
+                  <Text style={S.emptyListT}>No saved contexts yet.</Text>
+                ) : (
+                  savedContexts.map(ctx => (
+                    <TouchableOpacity key={ctx.id} style={S.ctxI} onPress={() => restoreContext(ctx)}>
+                      <Text style={S.ctxL}>{ctx.label}</Text>
+                      <Text style={S.ctxD}>{formatDate(new Date(ctx.timestamp))} • {ctx.tasks.length} tasks</Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+              <TouchableOpacity style={S.mCancel} onPress={() => setShowContexts(false)}>
+                <Text style={S.mCancelT}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Extracted Tasks Modal */}
+        <Modal visible={showExtracted} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={S.mC}>
+              <Text style={S.mT}>🎯 I noticed some tasks!</Text>
+              <Text style={S.mSub}>Want me to add these?</Text>
+              {extractedTasks.map((task, i) => (
+                <View key={i} style={S.extractedI}>
+                  <Text style={S.extractedT}>{task}</Text>
+                  <TouchableOpacity onPress={() => {
+                    addTask(task, 'medium');
+                    setExtractedTasks(prev => prev.filter((_, idx) => idx !== i));
+                  }}>
+                    <Text style={S.extractedA}>+ Add</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity style={S.mCancel} onPress={() => { setShowExtracted(false); setExtractedTasks([]); }}>
+                <Text style={S.mCancelT}>Skip All</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Celebration Overlay */}
+        {showCeleb && (
+          <Animated.View style={[S.celebO, { opacity: celebAnim, transform: [{ scale: celebAnim }] }]}>
+            <Text style={S.celebT}>{celebText}</Text>
+          </Animated.View>
+        )}
+
+        {/* Achievement Toast */}
+        {showAch && (
+          <Animated.View style={S.achToast}>
+            <Text style={S.achToastE}>{showAch.emoji}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={S.achToastTitle}>Achievement Unlocked!</Text>
+              <Text style={S.achToastN}>{showAch.name}</Text>
+            </View>
+            <Text style={S.achToastP}>+{showAch.points}</Text>
+          </Animated.View>
+        )}
+
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
+// ========== STYLES ==========
 const S = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg }, center: { justifyContent: 'center', alignItems: 'center' }, loadText: { color: C.text, fontSize: 18 },
-  welcomeC: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }, logo: { fontSize: 64, marginBottom: 16 }, title: { fontSize: 36, fontWeight: 'bold', color: C.text, marginBottom: 8 }, subtitle: { fontSize: 16, color: C.textSec, marginBottom: 40, textAlign: 'center' },
-  card: { backgroundColor: C.card, borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }, cardQ: { fontSize: 18, fontWeight: '600', color: C.text, marginBottom: 20, textAlign: 'center' },
-  opt: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 12, padding: 16, marginBottom: 12 }, optE: { fontSize: 24, marginRight: 16 }, optT: { fontSize: 16, fontWeight: '600', color: C.text }, optD: { fontSize: 14, color: C.textSec },
-  onbC: { flex: 1, padding: 20, justifyContent: 'center' }, prog: { height: 4, backgroundColor: C.border, borderRadius: 2, marginBottom: 40 }, progFill: { height: '100%', backgroundColor: C.primary, borderRadius: 2 }, onbQ: { fontSize: 24, fontWeight: '600', color: C.text, marginBottom: 30, textAlign: 'center' }, onbIn: { backgroundColor: C.card, borderRadius: 12, padding: 16, fontSize: 18, color: C.text, marginBottom: 20 },
-  onbOpt: { backgroundColor: C.card, borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 2, borderColor: 'transparent' }, onbOptSel: { borderColor: C.primary }, onbOptT: { fontSize: 16, color: C.text, textAlign: 'center' },
-  onbBtns: { flexDirection: 'row', justifyContent: 'center', marginTop: 40, gap: 12 }, backBtn: { padding: 16 }, backBtnT: { color: C.textSec, fontSize: 16 }, nextBtn: { backgroundColor: C.primary, borderRadius: 12, paddingVertical: 16, paddingHorizontal: 32 }, nextBtnT: { color: C.text, fontSize: 16, fontWeight: '600' }, skipBtn: { alignItems: 'center', marginTop: 20 }, skipBtnT: { color: C.textMuted, fontSize: 14 },
-  setHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: C.border }, setBack: { color: C.primary, fontSize: 16 }, setTitle: { color: C.text, fontSize: 18, fontWeight: '600' }, setCont: { flex: 1, padding: 16 }, setSec: { marginBottom: 32 }, setSecT: { color: C.textSec, fontSize: 14, fontWeight: '600', marginBottom: 12 },
-  setOpt: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 16, marginBottom: 8 }, setOptSel: { borderWidth: 2, borderColor: C.primary }, setOptE: { fontSize: 24, marginRight: 12 }, setOptT: { color: C.text, fontSize: 16, flex: 1 }, check: { color: C.primary, fontSize: 18 },
-  statsG: { flexDirection: 'row', gap: 12 }, statI: { backgroundColor: C.card, borderRadius: 12, padding: 16, flex: 1, alignItems: 'center' }, statV: { color: C.text, fontSize: 24, fontWeight: 'bold' }, statL: { color: C.textSec, fontSize: 12 },
-  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: C.border }, headL: { flexDirection: 'row', alignItems: 'center', gap: 12 }, headT: { color: C.text, fontSize: 20, fontWeight: '600' }, setIcon: { fontSize: 24 },
-  eBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }, eBadgeT: { color: C.bg, fontSize: 12, fontWeight: '600' },
-  eSel: { backgroundColor: C.card, margin: 16, borderRadius: 16, padding: 16 }, eSelT: { color: C.text, fontSize: 16, fontWeight: '600', marginBottom: 12, textAlign: 'center' }, eOpts: { flexDirection: 'row', justifyContent: 'space-around' }, eOpt: { paddingVertical: 12, paddingHorizontal: 20, borderRadius: 12, borderWidth: 2 }, eOptT: { color: C.text, fontSize: 14 },
+  container: { flex: 1, backgroundColor: C.bg },
+  center: { justifyContent: 'center', alignItems: 'center' },
+  loadText: { color: C.text, fontSize: 16, marginTop: 16 },
+
+  // Welcome
+  welcomeC: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  logo: { fontSize: 72, marginBottom: 16 },
+  title: { fontSize: 40, fontWeight: 'bold', color: C.text, marginBottom: 8 },
+  subtitle: { fontSize: 16, color: C.textSec, marginBottom: 48, textAlign: 'center' },
+  card: { backgroundColor: C.card, borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 },
+  cardQ: { fontSize: 18, fontWeight: '600', color: C.text, marginBottom: 24, textAlign: 'center' },
+  opt: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: 16, padding: 16, marginBottom: 12 },
+  optE: { fontSize: 28, marginRight: 16 },
+  optT: { fontSize: 16, fontWeight: '600', color: C.text },
+  optD: { fontSize: 14, color: C.textSec, marginTop: 2 },
+
+  // Onboarding
+  onbC: { flex: 1, padding: 24, justifyContent: 'center' },
+  prog: { height: 4, backgroundColor: C.border, borderRadius: 2, marginBottom: 48 },
+  progFill: { height: '100%', backgroundColor: C.primary, borderRadius: 2 },
+  onbQ: { fontSize: 26, fontWeight: '600', color: C.text, marginBottom: 32, textAlign: 'center' },
+  onbIn: { backgroundColor: C.card, borderRadius: 16, padding: 18, fontSize: 18, color: C.text, marginBottom: 24 },
+  optsCol: { gap: 12 },
+  onbOpt: { backgroundColor: C.card, borderRadius: 16, padding: 18, borderWidth: 2, borderColor: 'transparent' },
+  onbOptSel: { borderColor: C.primary },
+  onbOptT: { fontSize: 16, color: C.text, textAlign: 'center' },
+  onbOptD: { fontSize: 14, color: C.textSec, textAlign: 'center', marginTop: 4 },
+  onbBtns: { flexDirection: 'row', justifyContent: 'center', marginTop: 48, gap: 16 },
+  backBtn: { padding: 18 },
+  backBtnT: { color: C.textSec, fontSize: 16 },
+  nextBtn: { backgroundColor: C.primary, borderRadius: 16, paddingVertical: 18, paddingHorizontal: 36 },
+  nextBtnT: { color: C.text, fontSize: 16, fontWeight: '600' },
+  skipBtn: { alignItems: 'center', marginTop: 24 },
+  skipBtnT: { color: C.textMuted, fontSize: 14 },
+
+  // Settings
+  setHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: C.border },
+  setBack: { color: C.primary, fontSize: 16 },
+  setTitle: { color: C.text, fontSize: 18, fontWeight: '600' },
+  setCont: { flex: 1, padding: 16 },
+  setSec: { marginBottom: 32 },
+  setSecT: { color: C.textSec, fontSize: 13, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
+  setOpt: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 8 },
+  setOptSel: { borderWidth: 2, borderColor: C.primary },
+  setOptE: { fontSize: 24, marginRight: 14 },
+  setOptT: { color: C.text, fontSize: 16, fontWeight: '500', flex: 1 },
+  setOptD: { color: C.textSec, fontSize: 13 },
+  setIn: { backgroundColor: C.card, borderRadius: 14, padding: 16, fontSize: 16, color: C.text },
+  check: { color: C.primary, fontSize: 18, fontWeight: 'bold' },
+  statsG: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  statI: { backgroundColor: C.card, borderRadius: 14, padding: 18, width: '48%', alignItems: 'center' },
+  statV: { color: C.text, fontSize: 28, fontWeight: 'bold' },
+  statL: { color: C.textSec, fontSize: 12, marginTop: 4 },
+  achRow: { flexDirection: 'row', gap: 8 },
+  achMini: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center' },
+  achMiniE: { fontSize: 20 },
+  achLocked: { opacity: 0.4 },
+  dangerBtn: { backgroundColor: C.error + '30', borderRadius: 14, padding: 16, alignItems: 'center' },
+  dangerBtnT: { color: C.error, fontSize: 16, fontWeight: '600' },
+
+  // Header
+  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.border },
+  headL: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headT: { color: C.text, fontSize: 20, fontWeight: '700' },
+  headR: { flexDirection: 'row', gap: 8 },
+  headBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center' },
+  eBadge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 },
+  eBadgeT: { color: C.bg, fontSize: 12, fontWeight: '700' },
+
+  // Energy Selector
+  eSel: { backgroundColor: C.card, margin: 16, borderRadius: 18, padding: 18 },
+  eSelT: { color: C.text, fontSize: 16, fontWeight: '600', marginBottom: 14, textAlign: 'center' },
+  eOpts: { flexDirection: 'row', justifyContent: 'space-around' },
+  eOpt: { paddingVertical: 14, paddingHorizontal: 22, borderRadius: 14, borderWidth: 2 },
+  eOptT: { color: C.text, fontSize: 14, fontWeight: '600' },
+
+  // Breadcrumbs
+  bcs: { paddingHorizontal: 16, paddingVertical: 10, maxHeight: 50 },
+  bc: { backgroundColor: C.card, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, marginRight: 10 },
+  bcT: { color: C.textSec, fontSize: 12 },
+
+  // Main Content
   main: { flex: 1 },
-  msgs: { flex: 1, padding: 16 }, msg: { maxWidth: '80%', padding: 14, borderRadius: 16, marginBottom: 12 }, msgN: { backgroundColor: C.card, alignSelf: 'flex-start' }, msgU: { backgroundColor: C.primary, alignSelf: 'flex-end' }, msgT: { color: C.text, fontSize: 15 },
-  inC: { padding: 16, borderTopWidth: 1, borderTopColor: C.border }, inR: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 }, tIn: { flex: 1, backgroundColor: C.card, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: C.text, fontSize: 15, maxHeight: 100 }, sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center' }, sendBtnT: { color: C.text, fontSize: 20, fontWeight: 'bold' },
-  oneC: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }, oneL: { color: C.textSec, fontSize: 14, marginBottom: 16 }, oneCard: { backgroundColor: C.card, borderRadius: 20, padding: 32, alignItems: 'center', width: '100%', maxWidth: 350 }, eDot: { width: 12, height: 12, borderRadius: 6, marginBottom: 16 }, oneT: { color: C.text, fontSize: 22, fontWeight: '600', textAlign: 'center' }, microB: { color: C.gold, fontSize: 14, marginTop: 8 },
-  oneActs: { width: '100%', marginTop: 24, gap: 12 }, oneDone: { backgroundColor: C.success, borderRadius: 16, padding: 18, alignItems: 'center' }, oneDoneT: { color: C.text, fontSize: 18, fontWeight: '600' }, oneBreak: { backgroundColor: C.card, borderRadius: 16, padding: 14, alignItems: 'center' }, oneBreakT: { color: C.textSec, fontSize: 14 },
-  empty: { alignItems: 'center' }, emptyE: { fontSize: 48, marginBottom: 16 }, emptyT: { color: C.textSec, fontSize: 16, marginBottom: 24 }, addTaskBtn: { backgroundColor: C.primary, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 24 }, addTaskBtnT: { color: C.text, fontSize: 16, fontWeight: '600' },
-  listC: { flex: 1, padding: 16 }, listH: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }, listT: { color: C.text, fontSize: 20, fontWeight: '600' }, addBtn: { backgroundColor: C.primary, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 }, addBtnT: { color: C.text, fontSize: 14, fontWeight: '600' },
-  filterR: { flexDirection: 'row', gap: 8, marginBottom: 16 }, filterBtn: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: C.card }, filterBtnA: { backgroundColor: C.primary }, filterBtnT: { color: C.textSec, fontSize: 14 }, filterBtnTA: { color: C.text },
-  taskList: { flex: 1 }, taskI: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 8 }, chk: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: C.border, justifyContent: 'center', alignItems: 'center', marginRight: 12 }, chkD: { backgroundColor: C.success, borderColor: C.success }, taskE: { width: 4, height: 24, borderRadius: 2, marginRight: 12 }, taskT: { flex: 1, color: C.text, fontSize: 15 }, taskTD: { textDecorationLine: 'line-through', color: C.textMuted }, taskA: { fontSize: 16, marginLeft: 8 },
-  timeC: { flex: 1, padding: 16 }, timeT: { color: C.text, fontSize: 20, fontWeight: '600', marginBottom: 20 }, timeH: { flexDirection: 'row', marginBottom: 2 }, timeTm: { width: 50, color: C.textMuted, fontSize: 12 }, timeSlot: { flex: 1, height: 48, backgroundColor: C.card, borderRadius: 4 }, curLine: { position: 'absolute', top: '50%', left: 0, right: 0, height: 2, backgroundColor: C.primary },
-  dashC: { flex: 1, padding: 16 }, dashT: { color: C.text, fontSize: 20, fontWeight: '600', marginBottom: 20 }, dashStats: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 32 }, dashS: { alignItems: 'center' }, dashSV: { color: C.text, fontSize: 32, fontWeight: 'bold' }, dashSL: { color: C.textSec, fontSize: 12 },
-  achT: { color: C.text, fontSize: 18, fontWeight: '600', marginBottom: 16 }, achG: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 }, achI: { backgroundColor: C.card, borderRadius: 12, padding: 16, width: '30%', alignItems: 'center' }, achIL: { opacity: 0.5 }, achE: { fontSize: 28, marginBottom: 8 }, achN: { color: C.text, fontSize: 11, textAlign: 'center' },
-  minC: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }, minG: { color: C.text, fontSize: 28, fontWeight: '300', marginBottom: 16 }, minM: { color: C.textSec, fontSize: 16, marginBottom: 40 }, minTask: { backgroundColor: C.card, borderRadius: 20, padding: 24 }, minTaskT: { color: C.text, fontSize: 18 },
-  nav: { flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: C.border, paddingVertical: 8 }, navI: { alignItems: 'center', padding: 8 }, navE: { fontSize: 20 }, navL: { color: C.textMuted, fontSize: 10, marginTop: 4 }, navLA: { color: C.primary },
-  mO: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 }, mC: { backgroundColor: C.card, borderRadius: 20, padding: 24 }, mT: { color: C.text, fontSize: 20, fontWeight: '600', marginBottom: 16 }, mL: { color: C.textSec, fontSize: 14, marginBottom: 8 }, mIn: { backgroundColor: C.bg, borderRadius: 12, padding: 16, color: C.text, fontSize: 16, marginBottom: 16 },
-  ePick: { flexDirection: 'row', gap: 8, marginBottom: 24 }, ePickO: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: C.border, alignItems: 'center' }, ePickT: { color: C.text, fontSize: 18 },
-  mBtns: { flexDirection: 'row', gap: 12 }, mCancel: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.bg, alignItems: 'center' }, mCancelT: { color: C.textSec, fontSize: 16 }, mConfirm: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.primary, alignItems: 'center' }, mConfirmT: { color: C.text, fontSize: 16, fontWeight: '600' },
-  celebO: { position: 'absolute', top: '40%', left: '10%', right: '10%', backgroundColor: C.success, borderRadius: 20, padding: 24, alignItems: 'center' }, celebT: { color: C.text, fontSize: 24, fontWeight: 'bold' },
-  achToast: { position: 'absolute', top: 60, left: 20, right: 20, backgroundColor: C.gold, borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center' }, achToastE: { fontSize: 32, marginRight: 12 }, achToastN: { color: C.bg, fontSize: 16, fontWeight: 'bold', flex: 1 }, achToastP: { color: C.bg, fontSize: 18, fontWeight: 'bold' },
+
+  // Messages
+  msgs: { flex: 1, padding: 16 },
+  msg: { maxWidth: '85%', padding: 16, borderRadius: 18, marginBottom: 12, position: 'relative' },
+  msgN: { backgroundColor: C.card, alignSelf: 'flex-start', borderBottomLeftRadius: 6 },
+  msgU: { backgroundColor: C.primary, alignSelf: 'flex-end', borderBottomRightRadius: 6 },
+  msgT: { color: C.text, fontSize: 15, lineHeight: 22 },
+  modelBadge: { position: 'absolute', top: -6, right: -6, fontSize: 12 },
+
+  // Input
+  inC: { padding: 16, borderTopWidth: 1, borderTopColor: C.border },
+  inR: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center' },
+  iconBtnA: { backgroundColor: C.error },
+  tIn: { flex: 1, backgroundColor: C.card, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 12, color: C.text, fontSize: 15, maxHeight: 120 },
+  sendBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center' },
+  sendBtnT: { color: C.text, fontSize: 20, fontWeight: 'bold' },
+
+  // One Thing
+  oneC: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  oneL: { color: C.textSec, fontSize: 14, marginBottom: 20 },
+  oneCard: { backgroundColor: C.card, borderRadius: 24, padding: 36, alignItems: 'center', width: '100%', maxWidth: 360 },
+  eDot: { width: 14, height: 14, borderRadius: 7, marginBottom: 18 },
+  oneT: { color: C.text, fontSize: 24, fontWeight: '600', textAlign: 'center', lineHeight: 32 },
+  microB: { color: C.gold, fontSize: 14, marginTop: 12 },
+  oneActs: { width: '100%', marginTop: 28, gap: 14 },
+  oneDone: { backgroundColor: C.success, borderRadius: 18, padding: 20, alignItems: 'center' },
+  oneDoneT: { color: C.text, fontSize: 18, fontWeight: '700' },
+  oneBreak: { backgroundColor: C.card, borderRadius: 18, padding: 16, alignItems: 'center' },
+  oneBreakT: { color: C.textSec, fontSize: 14 },
+  microStarts: { marginTop: 36, width: '100%' },
+  microStartsT: { color: C.textMuted, fontSize: 12, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 },
+  microStartO: { backgroundColor: C.card, borderRadius: 14, padding: 14, marginBottom: 10 },
+  microStartT: { color: C.textSec, fontSize: 14 },
+  empty: { alignItems: 'center' },
+  emptyE: { fontSize: 56, marginBottom: 18 },
+  emptyT: { color: C.text, fontSize: 20, fontWeight: '600', marginBottom: 8 },
+  emptyS: { color: C.textSec, fontSize: 14, marginBottom: 28 },
+  addTaskBtn: { backgroundColor: C.primary, borderRadius: 16, paddingVertical: 16, paddingHorizontal: 28 },
+  addTaskBtnT: { color: C.text, fontSize: 16, fontWeight: '600' },
+
+  // List
+  listC: { flex: 1, padding: 16 },
+  listH: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  listT: { color: C.text, fontSize: 22, fontWeight: '700' },
+  addBtn: { backgroundColor: C.primary, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18 },
+  addBtnT: { color: C.text, fontSize: 14, fontWeight: '600' },
+  filterR: { flexDirection: 'row', gap: 10, marginBottom: 18 },
+  filterBtn: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 20, backgroundColor: C.card },
+  filterBtnA: { backgroundColor: C.primary },
+  filterBtnT: { color: C.textSec, fontSize: 14, fontWeight: '600' },
+  filterBtnTA: { color: C.text },
+  taskList: { flex: 1 },
+  taskI: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 10 },
+  taskIMicro: { marginLeft: 24, backgroundColor: C.card + '80' },
+  chk: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: C.border, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  chkD: { backgroundColor: C.success, borderColor: C.success },
+  chkT: { color: C.text, fontSize: 14, fontWeight: 'bold' },
+  taskE: { width: 5, height: 28, borderRadius: 3, marginRight: 14 },
+  taskT: { flex: 1, color: C.text, fontSize: 15 },
+  taskTD: { textDecorationLine: 'line-through', color: C.textMuted },
+  microL: { marginRight: 10, fontSize: 14 },
+  taskA: { fontSize: 18, marginLeft: 10 },
+  emptyList: { padding: 40, alignItems: 'center' },
+  emptyListT: { color: C.textMuted, fontSize: 16 },
+
+  // Timeline
+  timeC: { flex: 1, padding: 16 },
+  timeTitle: { color: C.text, fontSize: 22, fontWeight: '700', marginBottom: 6 },
+  timeSubtitle: { color: C.textSec, fontSize: 14, marginBottom: 24 },
+  timeH: { flexDirection: 'row', marginBottom: 4 },
+  timeTm: { width: 65, color: C.textSec, fontSize: 13 },
+  timeTmPast: { color: C.textMuted },
+  timeSlot: { flex: 1, height: 52, backgroundColor: C.card, borderRadius: 6, position: 'relative' },
+  timeSlotNow: { backgroundColor: C.primary + '30', borderWidth: 1, borderColor: C.primary },
+  curLine: { position: 'absolute', top: '50%', left: 0, right: 0, height: 2, backgroundColor: C.primary },
+
+  // Dashboard
+  dashC: { flex: 1, padding: 16 },
+  dashT: { color: C.text, fontSize: 22, fontWeight: '700', marginBottom: 24 },
+  dashStats: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 24 },
+  dashS: { alignItems: 'center' },
+  dashSV: { color: C.text, fontSize: 34, fontWeight: 'bold' },
+  dashSL: { color: C.textSec, fontSize: 12, marginTop: 4 },
+  achT: { color: C.text, fontSize: 18, fontWeight: '600', marginBottom: 18 },
+  achG: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  achI: { backgroundColor: C.card, borderRadius: 14, padding: 16, width: '31%', alignItems: 'center' },
+  achIL: { opacity: 0.4 },
+  achE: { fontSize: 30, marginBottom: 10 },
+  achN: { color: C.text, fontSize: 11, textAlign: 'center', fontWeight: '500' },
+  achP: { color: C.gold, fontSize: 11, marginTop: 6, fontWeight: '600' },
+  thoughtI: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 10 },
+  thoughtT: { color: C.text, fontSize: 14 },
+  thoughtD: { color: C.textMuted, fontSize: 12, marginTop: 6 },
+
+  // Minimal
+  minC: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 36 },
+  minG: { color: C.text, fontSize: 32, fontWeight: '300', marginBottom: 18 },
+  minM: { color: C.textSec, fontSize: 16, textAlign: 'center', marginBottom: 48, lineHeight: 24 },
+  minTask: { backgroundColor: C.card, borderRadius: 24, padding: 32, alignItems: 'center', width: '100%' },
+  minTaskT: { color: C.text, fontSize: 20, marginBottom: 10, textAlign: 'center' },
+  minTaskH: { color: C.textMuted, fontSize: 13 },
+  minEnergy: { marginTop: 36 },
+  minEnergyT: { color: C.textMuted, fontSize: 14 },
+
+  // Bottom Nav
+  nav: { flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: C.border, paddingVertical: 10 },
+  navI: { alignItems: 'center', padding: 8 },
+  navIA: { },
+  navE: { fontSize: 22 },
+  navL: { color: C.textMuted, fontSize: 10, marginTop: 4, fontWeight: '600' },
+  navLA: { color: C.primary },
+
+  // Modals
+  mO: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 24 },
+  mC: { backgroundColor: C.card, borderRadius: 24, padding: 28 },
+  mT: { color: C.text, fontSize: 22, fontWeight: '700', marginBottom: 8 },
+  mSub: { color: C.textSec, fontSize: 14, marginBottom: 24 },
+  mL: { color: C.textSec, fontSize: 14, marginBottom: 10 },
+  mIn: { backgroundColor: C.bg, borderRadius: 16, padding: 18, color: C.text, fontSize: 16, marginBottom: 20 },
+  ePick: { flexDirection: 'row', gap: 10, marginBottom: 28 },
+  ePickO: { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 2, borderColor: C.border, alignItems: 'center' },
+  ePickT: { color: C.text, fontSize: 14, fontWeight: '600' },
+  mBtns: { flexDirection: 'row', gap: 14 },
+  mCancel: { flex: 1, paddingVertical: 16, borderRadius: 14, backgroundColor: C.bg, alignItems: 'center' },
+  mCancelT: { color: C.textSec, fontSize: 16, fontWeight: '600' },
+  mConfirm: { flex: 1, paddingVertical: 16, borderRadius: 14, backgroundColor: C.primary, alignItems: 'center' },
+  mConfirmT: { color: C.text, fontSize: 16, fontWeight: '700' },
+  ctxI: { backgroundColor: C.bg, borderRadius: 14, padding: 16, marginBottom: 12 },
+  ctxL: { color: C.text, fontSize: 16, fontWeight: '600' },
+  ctxD: { color: C.textMuted, fontSize: 12, marginTop: 4 },
+  extractedI: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.bg, borderRadius: 14, padding: 16, marginBottom: 12 },
+  extractedT: { color: C.text, fontSize: 14, flex: 1 },
+  extractedA: { color: C.primary, fontSize: 14, fontWeight: '600' },
+
+  // Celebration
+  celebO: { position: 'absolute', top: '38%', left: '8%', right: '8%', backgroundColor: C.success, borderRadius: 24, padding: 32, alignItems: 'center' },
+  celebT: { color: C.text, fontSize: 28, fontWeight: 'bold', textAlign: 'center' },
+
+  // Achievement Toast
+  achToast: { position: 'absolute', top: 60, left: 20, right: 20, backgroundColor: C.gold, borderRadius: 18, padding: 18, flexDirection: 'row', alignItems: 'center' },
+  achToastE: { fontSize: 36, marginRight: 14 },
+  achToastTitle: { color: C.bg, fontSize: 12, fontWeight: '600' },
+  achToastN: { color: C.bg, fontSize: 18, fontWeight: 'bold' },
+  achToastP: { color: C.bg, fontSize: 22, fontWeight: 'bold' },
 });
