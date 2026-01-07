@@ -1,60 +1,153 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, SafeAreaView, Modal, Animated, Platform, KeyboardAvoidingView, ActivityIndicator, Switch } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { 
+  StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, 
+  SafeAreaView, Modal, Animated, Platform, KeyboardAvoidingView, 
+  ActivityIndicator, Switch, Linking, Alert
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Types
+// ============ TYPES ============
 type EnergyLevel = 'low' | 'medium' | 'high';
 type ViewMode = 'conversation' | 'oneThing' | 'list' | 'timeline' | 'dashboard' | 'minimal';
 type Personality = 'loyalFriend' | 'professional' | 'coach' | 'drillSergeant' | 'funny' | 'calm';
 type ThinkingMode = 'off' | 'minimal' | 'full';
+type NotificationStyle = 'gentle' | 'variable' | 'persistent';
 
-interface Task { id: string; title: string; energy: EnergyLevel; completed: boolean; isMicroStep: boolean; parentId?: string; createdAt: string; }
-interface Message { id: string; role: 'nero' | 'user'; content: string; model?: string; thinking?: string; timestamp: string; }
-interface Breadcrumb { id: string; text: string; timestamp: string; }
-interface SavedContext { id: string; label: string; tasks: string[]; breadcrumbs: string[]; energy: EnergyLevel | null; timestamp: string; }
-interface ThoughtDump { id: string; text: string; timestamp: string; processed: boolean; }
-interface Achievement { id: string; name: string; emoji: string; description: string; points: number; }
-interface NeroMemory { likes: string[]; dislikes: string[]; triggers: string[]; patterns: string[]; }
+interface Task {
+  id: string;
+  title: string;
+  energy: EnergyLevel;
+  completed: boolean;
+  isMicroStep: boolean;
+  parentId?: string;
+  createdAt: string;
+  dueDate?: string;
+  scheduledTime?: string;
+  synced?: boolean;
+}
 
-// Colors
+interface Message {
+  id: string;
+  role: 'nero' | 'user';
+  content: string;
+  model?: string;
+  thinking?: string;
+  timestamp: string;
+}
+
+interface Breadcrumb {
+  id: string;
+  text: string;
+  timestamp: string;
+}
+
+interface SavedContext {
+  id: string;
+  label: string;
+  tasks: string[];
+  breadcrumbs: string[];
+  energy: EnergyLevel | null;
+  timestamp: string;
+}
+
+interface ThoughtDump {
+  id: string;
+  text: string;
+  timestamp: string;
+  processed: boolean;
+}
+
+interface Achievement {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  points: number;
+}
+
+interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  allDay?: boolean;
+  color?: string;
+}
+
+interface UserProfile {
+  id?: string;
+  email?: string;
+  name: string;
+  neroName: string;
+  personality: Personality;
+  apiKey: string;
+  thinkingMode: ThinkingMode;
+  notificationStyle: NotificationStyle;
+  notificationsEnabled: boolean;
+  calendarConnected: boolean;
+  lastSync?: string;
+}
+
+interface NeroMemory {
+  likes: string[];
+  dislikes: string[];
+  triggers: string[];
+  patterns: string[];
+}
+
+// ============ CONSTANTS ============
 const C = {
-  primary: '#6C5CE7', primaryLight: '#A29BFE', bg: '#0F0F1A', card: '#252542', text: '#FFFFFF', 
-  textSec: '#B8B8D1', textMuted: '#6C6C8A', success: '#00B894', warning: '#FDCB6E', error: '#FF7675', 
-  border: '#3D3D5C', gold: '#F9CA24', teal: '#00CEC9', pink: '#FD79A8',
+  primary: '#6C5CE7',
+  primaryLight: '#A29BFE',
+  bg: '#0F0F1A',
+  card: '#252542',
+  text: '#FFFFFF',
+  textSec: '#B8B8D1',
+  textMuted: '#6C6C8A',
+  success: '#00B894',
+  warning: '#FDCB6E',
+  error: '#FF7675',
+  border: '#3D3D5C',
+  gold: '#F9CA24',
+  teal: '#00CEC9',
+  pink: '#FD79A8',
+  blue: '#0984E3',
 };
 
-// Personalities with full config
+// Supabase Config (User will add their own keys in settings)
+const SUPABASE_URL = 'https://wektbfkzbxvtxsremnnk.supabase.co';
+
 const PERSONALITIES: Record<string, { name: string; emoji: string; desc: string; color: string; greetings: string[]; systemPrompt: string }> = {
-  loyalFriend: { 
+  loyalFriend: {
     name: 'Loyal Friend', emoji: '🤗', desc: 'Warm, supportive, casual', color: C.primary,
     greetings: ["Hey there! 💙", "Hi friend!", "Hey! 👋", "Good to see you!"],
-    systemPrompt: "You are Nero, a warm and supportive AI companion. Be friendly, use casual language, light humor. Always be encouraging."
+    systemPrompt: "You are Nero, a warm and supportive AI companion for someone with ADHD. Be friendly, use casual language, light humor. Always be encouraging. Never guilt or shame."
   },
-  professional: { 
+  professional: {
     name: 'Professional', emoji: '💼', desc: 'Clear, efficient, minimal', color: C.teal,
     greetings: ["Hello.", "Ready when you are.", "How can I help?"],
-    systemPrompt: "You are Nero, a professional AI assistant. Be clear, efficient, and concise. Skip unnecessary words."
+    systemPrompt: "You are Nero, a professional AI assistant for someone with ADHD. Be clear, efficient, and concise. Skip unnecessary words. Respect their time and energy."
   },
-  coach: { 
+  coach: {
     name: 'Coach', emoji: '🏆', desc: 'Motivating, pushing gently', color: C.gold,
     greetings: ["Let's go! 💪", "Ready to crush it?", "Champion! Let's do this!"],
-    systemPrompt: "You are Nero, a motivating coach. Be encouraging, push gently, celebrate wins enthusiastically."
+    systemPrompt: "You are Nero, a motivating coach for someone with ADHD. Be encouraging, push gently, celebrate wins enthusiastically. Help them see their potential."
   },
-  drillSergeant: { 
+  drillSergeant: {
     name: 'Drill Sergeant', emoji: '🎖️', desc: 'Direct, firm, no excuses', color: '#E17055',
     greetings: ["Attention!", "Time to work.", "No excuses today."],
-    systemPrompt: "You are Nero, a firm but fair drill sergeant. Be direct, no-nonsense, but ultimately supportive."
+    systemPrompt: "You are Nero, a firm but fair drill sergeant for someone with ADHD. Be direct, no-nonsense, but ultimately supportive. They chose this mode because they need accountability."
   },
-  funny: { 
+  funny: {
     name: 'Funny', emoji: '😄', desc: 'Playful, jokes, light', color: C.pink,
     greetings: ["Heyyy! 😄", "Look who showed up!", "The legend returns!"],
-    systemPrompt: "You are Nero, a playful and funny AI companion. Use humor, puns, and keep things light while being helpful."
+    systemPrompt: "You are Nero, a playful and funny AI companion for someone with ADHD. Use humor, puns, and keep things light while being helpful. Laughter helps with dopamine!"
   },
-  calm: { 
+  calm: {
     name: 'Calm/Zen', emoji: '🧘', desc: 'Soft, gentle, no pressure', color: C.teal,
     greetings: ["Welcome 🌿", "Peace, friend.", "Breathe. You're here now."],
-    systemPrompt: "You are Nero, a calm and zen AI companion. Be gentle, soft-spoken, never rush. Create a peaceful space."
+    systemPrompt: "You are Nero, a calm and zen AI companion for someone with ADHD. Be gentle, soft-spoken, never rush. Create a peaceful space. Anxiety is real."
   },
 };
 
@@ -72,6 +165,7 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: 'five_tasks', name: 'Getting Going', emoji: '🚀', description: 'Complete 5 tasks', points: 25 },
   { id: 'ten_tasks', name: 'On a Roll', emoji: '🔥', description: 'Complete 10 tasks', points: 50 },
   { id: 'twenty_five', name: 'Unstoppable', emoji: '⚡', description: 'Complete 25 tasks', points: 100 },
+  { id: 'fifty_tasks', name: 'Task Master', emoji: '👑', description: 'Complete 50 tasks', points: 200 },
   { id: 'first_chat', name: 'Hello Nero', emoji: '👋', description: 'Start a conversation', points: 10 },
   { id: 'ten_chats', name: 'Best Friends', emoji: '💙', description: 'Send 10 messages', points: 25 },
   { id: 'low_energy_win', name: 'Low Energy Hero', emoji: '🌙', description: 'Complete task on low energy', points: 30 },
@@ -82,40 +176,72 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: 'comeback_kid', name: 'Comeback Kid', emoji: '🦸', description: 'Return after a day away', points: 30 },
   { id: 'early_bird', name: 'Early Bird', emoji: '🌅', description: 'Complete task before 9am', points: 20 },
   { id: 'night_owl', name: 'Night Owl', emoji: '🦉', description: 'Complete task after 10pm', points: 20 },
+  { id: 'calendar_pro', name: 'Calendar Pro', emoji: '📅', description: 'Connect your calendar', points: 25 },
+  { id: 'sync_master', name: 'Sync Master', emoji: '☁️', description: 'Enable cloud sync', points: 25 },
+  { id: 'week_warrior', name: 'Week Warrior', emoji: '🗓️', description: 'Use app for 7 days', points: 75 },
 ];
 
-const CELEBRATIONS = ['Nice work! 🎉', 'Crushed it! 💪', 'Amazing! ⭐', "That's a win! 🏆", 'Boom! 💥', 'Yes! 🙌', 'Nailed it! 🎯', 'Fantastic! ✨'];
+const CELEBRATIONS = ['Nice work! 🎉', 'Crushed it! 💪', 'Amazing! ⭐', "That's a win! 🏆", 'Boom! 💥', 'Yes! 🙌', 'Nailed it! 🎯', 'Fantastic! ✨', 'You did it! 🌟', 'Incredible! 💫'];
 const SURPRISES = [
-  { emoji: '🌟', msg: "You're amazing!" }, { emoji: '💎', msg: 'Rare focus achieved!' },
-  { emoji: '🦄', msg: 'Unicorn productivity!' }, { emoji: '🎁', msg: 'Surprise bonus!' },
-  { emoji: '⭐', msg: 'Star performer!' }, { emoji: '🔮', msg: 'Magic focus!' },
+  { emoji: '🌟', msg: "You're amazing!" },
+  { emoji: '💎', msg: 'Rare focus achieved!' },
+  { emoji: '🦄', msg: 'Unicorn productivity!' },
+  { emoji: '🎁', msg: 'Surprise bonus!' },
+  { emoji: '⭐', msg: 'Star performer!' },
+  { emoji: '🔮', msg: 'Magic focus!' },
+  { emoji: '🏅', msg: 'Gold medal moment!' },
 ];
+
+const NOTIFICATION_MESSAGES = {
+  gentle: [
+    "Hey, just checking in 💙",
+    "No pressure, but you've got this!",
+    "Tiny step whenever you're ready",
+    "Your future self will thank you",
+  ],
+  variable: [
+    "⚡ Quick! Do one tiny thing!",
+    "🎯 Focus mode: activated?",
+    "💪 You're stronger than the task!",
+    "🚀 3... 2... 1... GO!",
+  ],
+  persistent: [
+    "Task waiting for you!",
+    "Don't forget your goal!",
+    "Time to make progress!",
+    "You committed to this!",
+  ],
+};
 
 const MICRO_STARTS = [
-  "Just open it and look", "Set a 2-minute timer", "Do the tiniest first step",
-  "Just read the first line", "Move one thing", "Write one word",
+  "Just open it and look",
+  "Set a 2-minute timer",
+  "Do the tiniest first step",
+  "Just read the first line",
+  "Move one thing",
+  "Write one word",
+  "Take one breath, then start",
 ];
 
-// Helpers
+// ============ HELPERS ============
 const genId = () => Math.random().toString(36).substr(2, 9) + Date.now();
 const getEC = (e: EnergyLevel) => e === 'high' ? C.success : e === 'medium' ? C.warning : C.error;
 const getEE = (e: EnergyLevel) => e === 'high' ? '⚡' : e === 'medium' ? '✨' : '🌙';
 const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const formatDate = (d: Date) => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 
-// AI Service - Claude Integration
-const ANTHROPIC_API_KEY = ''; // Will be set by user in settings
+// ============ API SERVICES ============
 
+// Claude AI Service
 const callClaudeAPI = async (
-  messages: Message[], 
-  personality: Personality, 
+  messages: Message[],
+  personality: Personality,
   energy: EnergyLevel | null,
   tasks: Task[],
   memory: NeroMemory,
   apiKey: string
 ): Promise<{ content: string; thinking?: string; model: string }> => {
   if (!apiKey) {
-    // Fallback to local responses if no API key
     const pc = PERSONALITIES[personality];
     const responses = [
       `${pc.greetings[0]} What's the ONE thing you'd like to focus on?`,
@@ -125,13 +251,14 @@ const callClaudeAPI = async (
       `You're doing great just being here. One tiny step at a time! 💙`,
       `I hear you. Let's break that down into something tiny.`,
       `Totally valid! What would feel like a win today?`,
+      `Remember: done is better than perfect! What's one thing?`,
     ];
     return { content: responses[Math.floor(Math.random() * responses.length)], model: 'local' };
   }
 
   const pendingTasks = tasks.filter(t => !t.completed).slice(0, 5);
   const pc = PERSONALITIES[personality];
-  
+
   const systemPrompt = `${pc.systemPrompt}
 
 CRITICAL RULES FOR ADHD USERS:
@@ -142,15 +269,16 @@ CRITICAL RULES FOR ADHD USERS:
 - Match the user's energy level: ${energy || 'unknown'}
 - Help with task initiation - suggest tiny first steps
 - Celebrate every small win enthusiastically
+- If they mention feeling overwhelmed, acknowledge it first
 
 Current context:
 - Energy level: ${energy || 'not set'}
 - Pending tasks: ${pendingTasks.map(t => t.title).join(', ') || 'none'}
 - User likes: ${memory.likes.join(', ') || 'learning...'}
 - User dislikes: ${memory.dislikes.join(', ') || 'learning...'}
-- Patterns noticed: ${memory.patterns.join(', ') || 'still learning...'}
+- Patterns: ${memory.patterns.join(', ') || 'still observing...'}
 
-Remember: You're not just a task manager. You're a supportive companion who understands ADHD.`;
+You're not just a task manager. You're a supportive companion who truly understands ADHD.`;
 
   const apiMessages = messages.slice(-10).map(m => ({
     role: m.role === 'user' ? 'user' : 'assistant',
@@ -173,9 +301,7 @@ Remember: You're not just a task manager. You're a supportive companion who unde
       }),
     });
 
-    if (!response.ok) {
-      throw new Error('API request failed');
-    }
+    if (!response.ok) throw new Error('API request failed');
 
     const data = await response.json();
     return {
@@ -183,43 +309,250 @@ Remember: You're not just a task manager. You're a supportive companion who unde
       model: 'claude-sonnet',
     };
   } catch (error) {
-    console.error('Claude API error:', error);
     const pc = PERSONALITIES[personality];
-    return { 
+    return {
       content: `${pc.greetings[0]} I'm having trouble connecting, but I'm still here! What can I help with?`,
       model: 'fallback'
     };
   }
 };
 
-// Detect energy from message
+// Supabase Service
+class SupabaseService {
+  private url: string;
+  private key: string;
+
+  constructor(url: string, key: string) {
+    this.url = url;
+    this.key = key;
+  }
+
+  private async request(endpoint: string, options: RequestInit = {}) {
+    if (!this.key) throw new Error('No Supabase key configured');
+    
+    const response = await fetch(`${this.url}/rest/v1${endpoint}`, {
+      ...options,
+      headers: {
+        'apikey': this.key,
+        'Authorization': `Bearer ${this.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+        ...options.headers,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Supabase error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  async syncTasks(userId: string, tasks: Task[]) {
+    return this.request(`/tasks?user_id=eq.${userId}`, {
+      method: 'POST',
+      body: JSON.stringify(tasks.map(t => ({ ...t, user_id: userId }))),
+    });
+  }
+
+  async getTasks(userId: string): Promise<Task[]> {
+    return this.request(`/tasks?user_id=eq.${userId}&order=createdAt.desc`);
+  }
+
+  async syncProfile(profile: UserProfile) {
+    return this.request(`/profiles?id=eq.${profile.id}`, {
+      method: 'POST',
+      body: JSON.stringify(profile),
+    });
+  }
+
+  async getProfile(userId: string): Promise<UserProfile | null> {
+    const results = await this.request(`/profiles?id=eq.${userId}`);
+    return results[0] || null;
+  }
+}
+
+// Notification Service
+class NotificationService {
+  private style: NotificationStyle;
+  private enabled: boolean;
+  private timers: NodeJS.Timeout[] = [];
+
+  constructor(style: NotificationStyle = 'gentle', enabled: boolean = true) {
+    this.style = style;
+    this.enabled = enabled;
+  }
+
+  setStyle(style: NotificationStyle) {
+    this.style = style;
+  }
+
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+  }
+
+  getRandomMessage(): string {
+    const messages = NOTIFICATION_MESSAGES[this.style];
+    return messages[Math.floor(Math.random() * messages.length)];
+  }
+
+  scheduleNotification(title: string, body: string, delayMs: number) {
+    if (!this.enabled) return;
+
+    // For web, we use the Notification API
+    if (Platform.OS === 'web' && 'Notification' in window) {
+      const timer = setTimeout(() => {
+        if (Notification.permission === 'granted') {
+          new Notification(title, { body, icon: '🧠' });
+        }
+      }, delayMs);
+      this.timers.push(timer);
+    }
+  }
+
+  scheduleVariableReminder(taskTitle: string) {
+    if (!this.enabled) return;
+
+    // Variable timing - harder to ignore!
+    const delays = this.style === 'variable'
+      ? [5, 12, 23, 37, 52].map(m => m * 60 * 1000) // Random-feeling minutes
+      : [15, 30, 60].map(m => m * 60 * 1000); // Regular intervals
+
+    const delay = delays[Math.floor(Math.random() * delays.length)];
+    this.scheduleNotification('UnFocused', `${this.getRandomMessage()} Task: ${taskTitle}`, delay);
+  }
+
+  scheduleHyperfocusCheck(minutesActive: number) {
+    if (!this.enabled || minutesActive < 90) return;
+
+    this.scheduleNotification(
+      '🧠 Hyperfocus Check',
+      "You've been going for a while! Water? Stretch? Quick break?",
+      0
+    );
+  }
+
+  async requestPermission(): Promise<boolean> {
+    if (Platform.OS === 'web' && 'Notification' in window) {
+      const permission = await Notification.requestPermission();
+      return permission === 'granted';
+    }
+    return false;
+  }
+
+  clearAll() {
+    this.timers.forEach(t => clearTimeout(t));
+    this.timers = [];
+  }
+}
+
+// Calendar Service (Google Calendar via OAuth)
+class CalendarService {
+  private accessToken: string | null = null;
+
+  setAccessToken(token: string) {
+    this.accessToken = token;
+  }
+
+  async getEvents(timeMin: Date, timeMax: Date): Promise<CalendarEvent[]> {
+    if (!this.accessToken) {
+      // Return mock events for demo
+      const now = new Date();
+      return [
+        {
+          id: '1',
+          title: 'Morning Focus Block',
+          start: new Date(now.setHours(9, 0, 0, 0)).toISOString(),
+          end: new Date(now.setHours(11, 0, 0, 0)).toISOString(),
+          color: C.primary,
+        },
+        {
+          id: '2',
+          title: 'Lunch Break',
+          start: new Date(now.setHours(12, 0, 0, 0)).toISOString(),
+          end: new Date(now.setHours(13, 0, 0, 0)).toISOString(),
+          color: C.success,
+        },
+        {
+          id: '3',
+          title: 'Afternoon Tasks',
+          start: new Date(now.setHours(14, 0, 0, 0)).toISOString(),
+          end: new Date(now.setHours(17, 0, 0, 0)).toISOString(),
+          color: C.warning,
+        },
+      ];
+    }
+
+    try {
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+        `timeMin=${timeMin.toISOString()}&timeMax=${timeMax.toISOString()}&singleEvents=true&orderBy=startTime`,
+        {
+          headers: { Authorization: `Bearer ${this.accessToken}` },
+        }
+      );
+
+      if (!response.ok) throw new Error('Calendar API error');
+
+      const data = await response.json();
+      return (data.items || []).map((item: any) => ({
+        id: item.id,
+        title: item.summary || 'Untitled',
+        start: item.start?.dateTime || item.start?.date,
+        end: item.end?.dateTime || item.end?.date,
+        allDay: !!item.start?.date,
+      }));
+    } catch (error) {
+      console.error('Calendar error:', error);
+      return [];
+    }
+  }
+
+  calculateTravelTime(eventStart: Date, travelMinutes: number = 30): { shouldLeave: Date; message: string } | null {
+    const now = new Date();
+    const shouldLeave = new Date(eventStart.getTime() - travelMinutes * 60 * 1000);
+    const minutesUntilLeave = Math.floor((shouldLeave.getTime() - now.getTime()) / 60000);
+
+    if (minutesUntilLeave > 0 && minutesUntilLeave <= 60) {
+      return {
+        shouldLeave,
+        message: `Leave in ${minutesUntilLeave} min for your next event!`,
+      };
+    }
+    return null;
+  }
+}
+
+// Energy detection from text
 const detectEnergy = (text: string): EnergyLevel | null => {
   const lower = text.toLowerCase();
-  const lowWords = ['tired', 'exhausted', 'low', 'rough', 'struggling', 'cant', "can't", 'hard', 'difficult', 'overwhelmed', 'anxious', 'stressed'];
-  const highWords = ['great', 'good', 'energized', 'productive', 'motivated', 'excited', 'ready', 'pumped', 'focused'];
-  
+  const lowWords = ['tired', 'exhausted', 'low', 'rough', 'struggling', 'cant', "can't", 'hard', 'difficult', 'overwhelmed', 'anxious', 'stressed', 'drained', 'sleepy', 'foggy'];
+  const highWords = ['great', 'good', 'energized', 'productive', 'motivated', 'excited', 'ready', 'pumped', 'focused', 'amazing', 'awesome', 'fantastic'];
+
   if (lowWords.some(w => lower.includes(w))) return 'low';
   if (highWords.some(w => lower.includes(w))) return 'high';
   return null;
 };
 
-// Extract tasks from message
+// Extract tasks from natural language
 const extractTasks = (text: string): string[] => {
   const patterns = [
-    /i need to (.+?)(?:\.|,|$)/gi,
-    /i have to (.+?)(?:\.|,|$)/gi,
-    /i should (.+?)(?:\.|,|$)/gi,
-    /remind me to (.+?)(?:\.|,|$)/gi,
-    /don't forget to (.+?)(?:\.|,|$)/gi,
-    /todo:?\s*(.+?)(?:\.|,|$)/gi,
+    /i need to (.+?)(?:\.|,|!|$)/gi,
+    /i have to (.+?)(?:\.|,|!|$)/gi,
+    /i should (.+?)(?:\.|,|!|$)/gi,
+    /remind me to (.+?)(?:\.|,|!|$)/gi,
+    /don't forget to (.+?)(?:\.|,|!|$)/gi,
+    /todo:?\s*(.+?)(?:\.|,|!|$)/gi,
+    /i want to (.+?)(?:\.|,|!|$)/gi,
+    /gotta (.+?)(?:\.|,|!|$)/gi,
   ];
-  
+
   const tasks: string[] = [];
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(text)) !== null) {
       const task = match[1].trim();
-      if (task.length > 2 && task.length < 100) {
+      if (task.length > 2 && task.length < 100 && !tasks.includes(task)) {
         tasks.push(task.charAt(0).toUpperCase() + task.slice(1));
       }
     }
@@ -227,38 +560,42 @@ const extractTasks = (text: string): string[] => {
   return tasks;
 };
 
+// ============ MAIN APP COMPONENT ============
 export default function App() {
   // Core State
   const [screen, setScreen] = useState<'welcome' | 'onboarding' | 'main' | 'settings'>('welcome');
   const [view, setView] = useState<ViewMode>('conversation');
   const [loading, setLoading] = useState(true);
 
-  // User State
-  const [userName, setUserName] = useState('');
-  const [neroName, setNeroName] = useState('Nero');
-  const [personality, setPersonality] = useState<Personality>('loyalFriend');
-  const [energy, setEnergy] = useState<EnergyLevel | null>(null);
-  const [apiKey, setApiKey] = useState('');
-
-  // Settings
-  const [thinkingMode, setThinkingMode] = useState<ThinkingMode>('minimal');
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  // User Profile
+  const [profile, setProfile] = useState<UserProfile>({
+    name: '',
+    neroName: 'Nero',
+    personality: 'loyalFriend',
+    apiKey: '',
+    thinkingMode: 'minimal',
+    notificationStyle: 'gentle',
+    notificationsEnabled: true,
+    calendarConnected: false,
+  });
 
   // Data State
+  const [energy, setEnergy] = useState<EnergyLevel | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
   const [savedContexts, setSavedContexts] = useState<SavedContext[]>([]);
   const [thoughtDumps, setThoughtDumps] = useState<ThoughtDump[]>([]);
   const [achievements, setAchievements] = useState<string[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [neroMemory, setNeroMemory] = useState<NeroMemory>({ likes: [], dislikes: [], triggers: [], patterns: [] });
 
   // Stats
   const [stats, setStats] = useState({
     tasksCompleted: 0, messagesSent: 0, lowEnergyWins: 0, microSteps: 0,
     tasksBreakdown: 0, contextsSaved: 0, thoughtsDumped: 0, daysActive: 1,
-    totalPoints: 0, lastActiveDate: new Date().toDateString(),
+    totalPoints: 0, lastActiveDate: new Date().toDateString(), streak: 0,
+    sessionStart: Date.now(),
   });
 
   // UI State
@@ -279,20 +616,70 @@ export default function App() {
   const [filter, setFilter] = useState<EnergyLevel | 'all'>('all');
   const [listening, setListening] = useState(false);
   const [onbStep, setOnbStep] = useState(0);
-  const [showViewPicker, setShowViewPicker] = useState(false);
   const [extractedTasks, setExtractedTasks] = useState<string[]>([]);
   const [showExtracted, setShowExtracted] = useState(false);
+  const [showSync, setShowSync] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [supabaseKey, setSupabaseKey] = useState('');
+  const [travelAlert, setTravelAlert] = useState<string | null>(null);
+
+  // Services
+  const [notificationService] = useState(() => new NotificationService());
+  const [calendarService] = useState(() => new CalendarService());
 
   // Animation refs
   const celebAnim = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<ScrollView>(null);
 
+  // ============ EFFECTS ============
+
   // Load data on mount
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    loadData();
+    requestNotificationPermission();
+  }, []);
+
+  // Check for hyperfocus
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const minutesActive = Math.floor((Date.now() - stats.sessionStart) / 60000);
+      if (minutesActive > 0 && minutesActive % 90 === 0) {
+        notificationService.scheduleHyperfocusCheck(minutesActive);
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [stats.sessionStart]);
+
+  // Load calendar events
+  useEffect(() => {
+    if (profile.calendarConnected) {
+      loadCalendarEvents();
+    }
+  }, [profile.calendarConnected]);
+
+  // Check travel time alerts
+  useEffect(() => {
+    const checkTravel = () => {
+      for (const event of calendarEvents) {
+        const alert = calendarService.calculateTravelTime(new Date(event.start));
+        if (alert) {
+          setTravelAlert(alert.message);
+          setTimeout(() => setTravelAlert(null), 30000);
+          break;
+        }
+      }
+    };
+
+    const interval = setInterval(checkTravel, 60000);
+    checkTravel(); // Check immediately
+    return () => clearInterval(interval);
+  }, [calendarEvents]);
+
+  // ============ DATA FUNCTIONS ============
 
   const loadData = async () => {
     try {
-      const keys = ['@uf/tasks', '@uf/msgs', '@uf/stats', '@uf/ach', '@uf/profile', '@uf/onb', '@uf/memory', '@uf/contexts', '@uf/thoughts', '@uf/bcs'];
+      const keys = ['@uf/tasks', '@uf/msgs', '@uf/stats', '@uf/ach', '@uf/profile', '@uf/onb', '@uf/memory', '@uf/contexts', '@uf/thoughts', '@uf/bcs', '@uf/sbkey'];
       const results = await AsyncStorage.multiGet(keys);
       const data: Record<string, any> = {};
       results.forEach(([key, value]) => { if (value) data[key] = JSON.parse(value); });
@@ -301,11 +688,13 @@ export default function App() {
       if (data['@uf/msgs']) setMessages(data['@uf/msgs']);
       if (data['@uf/stats']) {
         const savedStats = data['@uf/stats'];
-        // Check for comeback
-        if (savedStats.lastActiveDate !== new Date().toDateString()) {
+        const today = new Date().toDateString();
+        if (savedStats.lastActiveDate !== today) {
           savedStats.daysActive += 1;
-          savedStats.lastActiveDate = new Date().toDateString();
+          savedStats.streak = isYesterday(savedStats.lastActiveDate) ? savedStats.streak + 1 : 1;
+          savedStats.lastActiveDate = today;
         }
+        savedStats.sessionStart = Date.now();
         setStats(savedStats);
       }
       if (data['@uf/ach']) setAchievements(data['@uf/ach']);
@@ -313,15 +702,9 @@ export default function App() {
       if (data['@uf/contexts']) setSavedContexts(data['@uf/contexts']);
       if (data['@uf/thoughts']) setThoughtDumps(data['@uf/thoughts']);
       if (data['@uf/bcs']) setBreadcrumbs(data['@uf/bcs']);
-      if (data['@uf/profile']) {
-        const p = data['@uf/profile'];
-        setUserName(p.name || '');
-        setNeroName(p.nero || 'Nero');
-        setPersonality(p.pers || 'loyalFriend');
-        setApiKey(p.apiKey || '');
-        setThinkingMode(p.thinkingMode || 'minimal');
-      }
-      
+      if (data['@uf/sbkey']) setSupabaseKey(data['@uf/sbkey']);
+      if (data['@uf/profile']) setProfile(data['@uf/profile']);
+
       setScreen(data['@uf/onb'] === true ? 'main' : 'welcome');
     } catch (e) {
       console.error('Load error:', e);
@@ -330,23 +713,44 @@ export default function App() {
     }
   };
 
-  // Save helpers
+  const isYesterday = (dateStr: string) => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return dateStr === yesterday.toDateString();
+  };
+
   const save = async (key: string, data: any) => {
     try { await AsyncStorage.setItem(key, JSON.stringify(data)); } catch (e) { console.error('Save error:', e); }
   };
 
   useEffect(() => { save('@uf/tasks', tasks); }, [tasks]);
-  useEffect(() => { save('@uf/msgs', messages.slice(-100)); }, [messages]); // Keep last 100
+  useEffect(() => { save('@uf/msgs', messages.slice(-100)); }, [messages]);
   useEffect(() => { save('@uf/stats', stats); }, [stats]);
   useEffect(() => { save('@uf/ach', achievements); }, [achievements]);
   useEffect(() => { save('@uf/memory', neroMemory); }, [neroMemory]);
   useEffect(() => { save('@uf/contexts', savedContexts); }, [savedContexts]);
   useEffect(() => { save('@uf/thoughts', thoughtDumps); }, [thoughtDumps]);
   useEffect(() => { save('@uf/bcs', breadcrumbs.slice(-20)); }, [breadcrumbs]);
+  useEffect(() => { save('@uf/profile', profile); }, [profile]);
+  useEffect(() => { if (supabaseKey) save('@uf/sbkey', supabaseKey); }, [supabaseKey]);
 
-  const saveProfile = () => save('@uf/profile', { name: userName, nero: neroName, pers: personality, apiKey, thinkingMode });
+  const requestNotificationPermission = async () => {
+    const granted = await notificationService.requestPermission();
+    if (granted) {
+      setProfile(p => ({ ...p, notificationsEnabled: true }));
+    }
+  };
 
-  // Achievement checking
+  const loadCalendarEvents = async () => {
+    const now = new Date();
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+    const events = await calendarService.getEvents(now, endOfDay);
+    setCalendarEvents(events);
+  };
+
+  // ============ ACHIEVEMENT SYSTEM ============
+
   const checkAchievements = (newStats: typeof stats) => {
     const hour = new Date().getHours();
     const conditions: Record<string, boolean> = {
@@ -354,6 +758,7 @@ export default function App() {
       five_tasks: newStats.tasksCompleted >= 5,
       ten_tasks: newStats.tasksCompleted >= 10,
       twenty_five: newStats.tasksCompleted >= 25,
+      fifty_tasks: newStats.tasksCompleted >= 50,
       first_chat: newStats.messagesSent >= 1,
       ten_chats: newStats.messagesSent >= 10,
       low_energy_win: newStats.lowEnergyWins >= 1,
@@ -364,6 +769,9 @@ export default function App() {
       comeback_kid: newStats.daysActive >= 2,
       early_bird: hour < 9 && newStats.tasksCompleted > 0,
       night_owl: hour >= 22 && newStats.tasksCompleted > 0,
+      calendar_pro: profile.calendarConnected,
+      sync_master: !!supabaseKey,
+      week_warrior: newStats.daysActive >= 7,
     };
 
     for (const ach of ACHIEVEMENTS) {
@@ -377,17 +785,17 @@ export default function App() {
     }
   };
 
-  // Add breadcrumb
+  // ============ TASK FUNCTIONS ============
+
   const addBreadcrumb = (text: string) => {
     const bc: Breadcrumb = { id: genId(), text, timestamp: new Date().toISOString() };
     setBreadcrumbs(prev => [...prev.slice(-19), bc]);
   };
 
-  // Task functions
   const addTask = (title?: string, taskEnergy?: EnergyLevel, isMicro?: boolean, parentId?: string) => {
     const taskTitle = title || newTask;
     if (!taskTitle.trim()) return;
-    
+
     const task: Task = {
       id: genId(),
       title: taskTitle.trim(),
@@ -396,8 +804,9 @@ export default function App() {
       isMicroStep: isMicro || false,
       parentId,
       createdAt: new Date().toISOString(),
+      synced: false,
     };
-    
+
     if (parentId) {
       setTasks(prev => {
         const idx = prev.findIndex(t => t.id === parentId);
@@ -408,9 +817,14 @@ export default function App() {
     } else {
       setTasks(prev => [task, ...prev]);
     }
-    
+
     addBreadcrumb(`Added: ${taskTitle.slice(0, 30)}`);
     if (!title) { setNewTask(''); setShowAdd(false); }
+
+    // Schedule notification reminder
+    if (profile.notificationsEnabled) {
+      notificationService.scheduleVariableReminder(taskTitle);
+    }
   };
 
   const completeTask = (id: string) => {
@@ -474,7 +888,8 @@ export default function App() {
     addBreadcrumb(`🔨 Broke down: ${task.title.slice(0, 25)}`);
   };
 
-  // Message/Chat functions
+  // ============ MESSAGE FUNCTIONS ============
+
   const sendMessage = async () => {
     if (!input.trim()) return;
 
@@ -488,18 +903,15 @@ export default function App() {
     const userInput = input;
     setInput('');
     setTyping(true);
-    if (thinkingMode !== 'off') setThinkingText('Thinking...');
+    if (profile.thinkingMode !== 'off') setThinkingText('Thinking...');
 
-    // Update stats
     const newStats = { ...stats, messagesSent: stats.messagesSent + 1 };
     setStats(newStats);
     checkAchievements(newStats);
 
-    // Detect energy
     const detectedEnergy = detectEnergy(userInput);
     if (detectedEnergy) setEnergy(detectedEnergy);
 
-    // Extract tasks
     const extracted = extractTasks(userInput);
     if (extracted.length > 0) {
       setExtractedTasks(extracted);
@@ -508,8 +920,7 @@ export default function App() {
 
     addBreadcrumb(`You: ${userInput.slice(0, 35)}`);
 
-    // Get AI response
-    if (thinkingMode === 'full') {
+    if (profile.thinkingMode === 'full') {
       setThinkingText('Analyzing your message...');
       await new Promise(r => setTimeout(r, 500));
       setThinkingText('Checking your tasks and energy...');
@@ -519,11 +930,11 @@ export default function App() {
 
     const response = await callClaudeAPI(
       [...messages, userMsg],
-      personality,
+      profile.personality,
       energy,
       tasks,
       neroMemory,
-      apiKey
+      profile.apiKey
     );
 
     setThinkingText('');
@@ -538,13 +949,14 @@ export default function App() {
       timestamp: new Date().toISOString(),
     };
     setMessages(prev => [...prev, neroMsg]);
-    addBreadcrumb(`${neroName}: ${response.content.slice(0, 35)}`);
+    addBreadcrumb(`${profile.neroName}: ${response.content.slice(0, 35)}`);
   };
 
-  // Context functions
+  // ============ CONTEXT FUNCTIONS ============
+
   const saveContext = () => {
     if (!ctxLabel.trim()) return;
-    
+
     const ctx: SavedContext = {
       id: genId(),
       label: ctxLabel.trim(),
@@ -553,8 +965,8 @@ export default function App() {
       energy,
       timestamp: new Date().toISOString(),
     };
-    
-    setSavedContexts(prev => [ctx, ...prev.slice(0, 9)]); // Keep max 10
+
+    setSavedContexts(prev => [ctx, ...prev.slice(0, 9)]);
     const newStats = { ...stats, contextsSaved: stats.contextsSaved + 1 };
     setStats(newStats);
     checkAchievements(newStats);
@@ -567,8 +979,7 @@ export default function App() {
     if (ctx.energy) setEnergy(ctx.energy);
     addBreadcrumb(`📌 Restored: ${ctx.label}`);
     setShowContexts(false);
-    
-    // Add a message about restored context
+
     const msg: Message = {
       id: genId(),
       role: 'nero',
@@ -578,17 +989,16 @@ export default function App() {
     setMessages(prev => [...prev, msg]);
   };
 
-  // Thought dump
   const dumpThought = () => {
     if (!thought.trim()) return;
-    
+
     const dump: ThoughtDump = {
       id: genId(),
       text: thought.trim(),
       timestamp: new Date().toISOString(),
       processed: false,
     };
-    
+
     setThoughtDumps(prev => [dump, ...prev]);
     const newStats = { ...stats, thoughtsDumped: stats.thoughtsDumped + 1 };
     setStats(newStats);
@@ -598,35 +1008,77 @@ export default function App() {
     setShowThought(false);
   };
 
-  // Voice input (simulated for web)
+  // ============ SYNC FUNCTIONS ============
+
+  const syncToCloud = async () => {
+    if (!supabaseKey) {
+      Alert.alert('Setup Required', 'Please add your Supabase anon key in settings.');
+      return;
+    }
+
+    setSyncing(true);
+    try {
+      const supabase = new SupabaseService(SUPABASE_URL, supabaseKey);
+      const userId = profile.id || genId();
+
+      if (!profile.id) {
+        setProfile(p => ({ ...p, id: userId }));
+      }
+
+      await supabase.syncTasks(userId, tasks);
+      await supabase.syncProfile({ ...profile, id: userId });
+
+      setTasks(prev => prev.map(t => ({ ...t, synced: true })));
+      setProfile(p => ({ ...p, lastSync: new Date().toISOString() }));
+
+      const newStats = { ...stats };
+      checkAchievements(newStats);
+
+      Alert.alert('Synced!', 'Your data has been saved to the cloud ☁️');
+    } catch (error) {
+      Alert.alert('Sync Error', 'Could not connect to cloud. Check your Supabase key.');
+    } finally {
+      setSyncing(false);
+      setShowSync(false);
+    }
+  };
+
+  // ============ VOICE INPUT ============
+
   const startVoiceInput = () => {
     setListening(true);
-    // Simulated voice - in real app would use expo-speech
+    // Simulated for web - in native app would use expo-speech
     setTimeout(() => {
-      setInput("I need to finish that report today");
+      const samples = [
+        "I need to finish that report today",
+        "Remind me to call mom",
+        "I'm feeling pretty tired today",
+        "What should I focus on?",
+      ];
+      setInput(samples[Math.floor(Math.random() * samples.length)]);
       setListening(false);
     }, 2000);
   };
 
-  // Onboarding complete
+  // ============ ONBOARDING ============
+
   const finishOnboarding = async () => {
     await AsyncStorage.setItem('@uf/onb', JSON.stringify(true));
-    saveProfile();
     setScreen('main');
-    
-    const greeting = PERSONALITIES[personality].greetings[Math.floor(Math.random() * PERSONALITIES[personality].greetings.length)];
+
+    const greeting = PERSONALITIES[profile.personality].greetings[Math.floor(Math.random() * PERSONALITIES[profile.personality].greetings.length)];
     const welcomeMsg: Message = {
       id: genId(),
       role: 'nero',
-      content: userName 
-        ? `${greeting} Great to meet you, ${userName}! I'm ${neroName}, your ADHD companion. What's on your mind?`
-        : `${greeting} I'm ${neroName}, your ADHD companion. Ready to help whenever you are!`,
+      content: profile.name
+        ? `${greeting} Great to meet you, ${profile.name}! I'm ${profile.neroName}, your ADHD companion. What's on your mind?`
+        : `${greeting} I'm ${profile.neroName}, your ADHD companion. Ready to help whenever you are!`,
       timestamp: new Date().toISOString(),
     };
     setMessages([welcomeMsg]);
   };
 
-  // ========== RENDER ==========
+  // ============ RENDER ============
 
   if (loading) {
     return (
@@ -646,17 +1098,17 @@ export default function App() {
           <Text style={S.logo}>🧠</Text>
           <Text style={S.title}>UnFocused</Text>
           <Text style={S.subtitle}>Your AI Companion for the ADHD Brain</Text>
-          
+
           <View style={S.card}>
             <Text style={S.cardQ}>How much do you want to tell me?</Text>
-            
+
             {[
               { k: 'skip', e: '🚀', t: "Let's just start", d: "I'll learn as we go" },
               { k: 'quick', e: '💬', t: 'A few quick questions', d: '~1 minute setup' },
               { k: 'deep', e: '🎯', t: 'Deep dive', d: 'Hit the ground running' },
             ].map(o => (
-              <TouchableOpacity 
-                key={o.k} 
+              <TouchableOpacity
+                key={o.k}
                 style={S.opt}
                 onPress={() => {
                   if (o.k === 'skip') finishOnboarding();
@@ -699,8 +1151,8 @@ export default function App() {
           {current.type === 'name' && (
             <TextInput
               style={S.onbIn}
-              value={userName}
-              onChangeText={setUserName}
+              value={profile.name}
+              onChangeText={(t) => setProfile(p => ({ ...p, name: t }))}
               placeholder="Your name (optional)"
               placeholderTextColor={C.textMuted}
               autoFocus
@@ -730,10 +1182,10 @@ export default function App() {
           {current.type === 'personality' && (
             <View style={S.optsCol}>
               {Object.entries(PERSONALITIES).slice(0, 4).map(([key, val]) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   key={key}
-                  style={[S.onbOpt, personality === key && S.onbOptSel]}
-                  onPress={() => setPersonality(key as Personality)}
+                  style={[S.onbOpt, profile.personality === key && S.onbOptSel]}
+                  onPress={() => setProfile(p => ({ ...p, personality: key as Personality }))}
                 >
                   <Text style={S.onbOptT}>{val.emoji} {val.name}</Text>
                   <Text style={S.onbOptD}>{val.desc}</Text>
@@ -748,7 +1200,7 @@ export default function App() {
                 <Text style={S.backBtnT}>← Back</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={S.nextBtn}
               onPress={() => {
                 if (onbStep < questions.length - 1) setOnbStep(s => s + 1);
@@ -775,7 +1227,7 @@ export default function App() {
       <SafeAreaView style={S.container}>
         <StatusBar style="light" />
         <View style={S.setHead}>
-          <TouchableOpacity onPress={() => { saveProfile(); setScreen('main'); }}>
+          <TouchableOpacity onPress={() => setScreen('main')}>
             <Text style={S.setBack}>← Back</Text>
           </TouchableOpacity>
           <Text style={S.setTitle}>Settings</Text>
@@ -785,19 +1237,19 @@ export default function App() {
         <ScrollView style={S.setCont}>
           {/* Personality */}
           <View style={S.setSec}>
-            <Text style={S.setSecT}>{neroName}'s Personality</Text>
+            <Text style={S.setSecT}>{profile.neroName}'s Personality</Text>
             {Object.entries(PERSONALITIES).map(([key, val]) => (
-              <TouchableOpacity 
+              <TouchableOpacity
                 key={key}
-                style={[S.setOpt, personality === key && S.setOptSel]}
-                onPress={() => setPersonality(key as Personality)}
+                style={[S.setOpt, profile.personality === key && S.setOptSel]}
+                onPress={() => setProfile(p => ({ ...p, personality: key as Personality }))}
               >
                 <Text style={S.setOptE}>{val.emoji}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={S.setOptT}>{val.name}</Text>
                   <Text style={S.setOptD}>{val.desc}</Text>
                 </View>
-                {personality === key && <Text style={S.check}>✓</Text>}
+                {profile.personality === key && <Text style={S.check}>✓</Text>}
               </TouchableOpacity>
             ))}
           </View>
@@ -807,38 +1259,121 @@ export default function App() {
             <Text style={S.setSecT}>Companion Name</Text>
             <TextInput
               style={S.setIn}
-              value={neroName}
-              onChangeText={setNeroName}
+              value={profile.neroName}
+              onChangeText={(t) => setProfile(p => ({ ...p, neroName: t }))}
               placeholder="AI companion name"
               placeholderTextColor={C.textMuted}
             />
           </View>
 
-          {/* API Key */}
+          {/* Notifications */}
           <View style={S.setSec}>
-            <Text style={S.setSecT}>Claude API Key (Optional)</Text>
-            <Text style={[S.setOptD, { marginBottom: 8 }]}>For smarter responses. Leave empty for basic mode.</Text>
+            <Text style={S.setSecT}>🔔 Notifications</Text>
+            <View style={S.setRow}>
+              <Text style={S.setOptT}>Enable Notifications</Text>
+              <Switch
+                value={profile.notificationsEnabled}
+                onValueChange={(v) => {
+                  setProfile(p => ({ ...p, notificationsEnabled: v }));
+                  notificationService.setEnabled(v);
+                }}
+                trackColor={{ true: C.primary }}
+              />
+            </View>
+            {profile.notificationsEnabled && (
+              <>
+                <Text style={[S.setOptD, { marginTop: 12, marginBottom: 8 }]}>Notification Style:</Text>
+                {(['gentle', 'variable', 'persistent'] as NotificationStyle[]).map(style => (
+                  <TouchableOpacity
+                    key={style}
+                    style={[S.setOpt, profile.notificationStyle === style && S.setOptSel]}
+                    onPress={() => {
+                      setProfile(p => ({ ...p, notificationStyle: style }));
+                      notificationService.setStyle(style);
+                    }}
+                  >
+                    <Text style={S.setOptT}>
+                      {style === 'gentle' ? '🌸 Gentle' : style === 'variable' ? '🎲 Variable' : '💪 Persistent'}
+                    </Text>
+                    <Text style={S.setOptD}>
+                      {style === 'gentle' ? 'Soft, kind reminders' : style === 'variable' ? 'Random timing (harder to ignore!)' : 'Regular, firm reminders'}
+                    </Text>
+                    {profile.notificationStyle === style && <Text style={S.check}>✓</Text>}
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
+          </View>
+
+          {/* Calendar */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>📅 Calendar Integration</Text>
+            <TouchableOpacity
+              style={[S.setOpt, profile.calendarConnected && S.setOptSel]}
+              onPress={() => {
+                setProfile(p => ({ ...p, calendarConnected: !p.calendarConnected }));
+                if (!profile.calendarConnected) {
+                  loadCalendarEvents();
+                  const newStats = { ...stats };
+                  checkAchievements(newStats);
+                }
+              }}
+            >
+              <Text style={S.setOptE}>{profile.calendarConnected ? '✓' : '○'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={S.setOptT}>{profile.calendarConnected ? 'Calendar Connected' : 'Connect Calendar'}</Text>
+                <Text style={S.setOptD}>See events in Timeline, get travel alerts</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Cloud Sync */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>☁️ Cloud Sync (Supabase)</Text>
+            <Text style={[S.setOptD, { marginBottom: 8 }]}>Sync your data across devices</Text>
             <TextInput
               style={S.setIn}
-              value={apiKey}
-              onChangeText={setApiKey}
+              value={supabaseKey}
+              onChangeText={setSupabaseKey}
+              placeholder="Supabase anon key"
+              placeholderTextColor={C.textMuted}
+              secureTextEntry
+            />
+            {supabaseKey && (
+              <TouchableOpacity style={[S.syncBtn, syncing && { opacity: 0.5 }]} onPress={syncToCloud} disabled={syncing}>
+                <Text style={S.syncBtnT}>{syncing ? 'Syncing...' : '☁️ Sync Now'}</Text>
+              </TouchableOpacity>
+            )}
+            {profile.lastSync && (
+              <Text style={S.lastSync}>Last sync: {formatDate(new Date(profile.lastSync))}</Text>
+            )}
+          </View>
+
+          {/* Claude API */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>🧠 Claude API Key (Optional)</Text>
+            <Text style={[S.setOptD, { marginBottom: 8 }]}>For smarter, personalized responses</Text>
+            <TextInput
+              style={S.setIn}
+              value={profile.apiKey}
+              onChangeText={(t) => setProfile(p => ({ ...p, apiKey: t }))}
               placeholder="sk-ant-..."
               placeholderTextColor={C.textMuted}
               secureTextEntry
             />
           </View>
 
-          {/* Thinking Mode */}
+          {/* AI Thinking Mode */}
           <View style={S.setSec}>
             <Text style={S.setSecT}>AI Thinking Display</Text>
             {(['off', 'minimal', 'full'] as ThinkingMode[]).map(mode => (
-              <TouchableOpacity 
+              <TouchableOpacity
                 key={mode}
-                style={[S.setOpt, thinkingMode === mode && S.setOptSel]}
-                onPress={() => setThinkingMode(mode)}
+                style={[S.setOpt, profile.thinkingMode === mode && S.setOptSel]}
+                onPress={() => setProfile(p => ({ ...p, thinkingMode: mode }))}
               >
                 <Text style={S.setOptT}>{mode.charAt(0).toUpperCase() + mode.slice(1)}</Text>
-                {thinkingMode === mode && <Text style={S.check}>✓</Text>}
+                {profile.thinkingMode === mode && <Text style={S.check}>✓</Text>}
               </TouchableOpacity>
             ))}
           </View>
@@ -851,22 +1386,12 @@ export default function App() {
               <View style={S.statI}><Text style={S.statV}>{stats.messagesSent}</Text><Text style={S.statL}>Messages</Text></View>
               <View style={S.statI}><Text style={S.statV}>{stats.totalPoints}</Text><Text style={S.statL}>Points</Text></View>
               <View style={S.statI}><Text style={S.statV}>{stats.daysActive}</Text><Text style={S.statL}>Days Active</Text></View>
+              <View style={S.statI}><Text style={S.statV}>{stats.streak}</Text><Text style={S.statL}>Day Streak</Text></View>
+              <View style={S.statI}><Text style={S.statV}>{achievements.length}/{ACHIEVEMENTS.length}</Text><Text style={S.statL}>Achievements</Text></View>
             </View>
           </View>
 
-          {/* Achievements Preview */}
-          <View style={S.setSec}>
-            <Text style={S.setSecT}>Achievements ({achievements.length}/{ACHIEVEMENTS.length})</Text>
-            <View style={S.achRow}>
-              {ACHIEVEMENTS.slice(0, 6).map(a => (
-                <View key={a.id} style={[S.achMini, !achievements.includes(a.id) && S.achLocked]}>
-                  <Text style={S.achMiniE}>{achievements.includes(a.id) ? a.emoji : '🔒'}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-
-          {/* Data Management */}
+          {/* Data Reset */}
           <View style={S.setSec}>
             <Text style={S.setSecT}>Data</Text>
             <TouchableOpacity style={S.dangerBtn} onPress={async () => {
@@ -883,7 +1408,7 @@ export default function App() {
     );
   }
 
-  // ========== MAIN APP ==========
+  // ============ MAIN APP ============
   const pendingTasks = tasks.filter(t => !t.completed);
   const filteredTasks = filter === 'all' ? pendingTasks : pendingTasks.filter(t => t.energy === filter);
   const nextTask = pendingTasks[0];
@@ -893,11 +1418,11 @@ export default function App() {
     <SafeAreaView style={S.container}>
       <StatusBar style="light" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        
+
         {/* HEADER */}
         <View style={S.head}>
           <View style={S.headL}>
-            <Text style={S.headT}>{neroName}</Text>
+            <Text style={S.headT}>{profile.neroName}</Text>
             {energy && (
               <View style={[S.eBadge, { backgroundColor: getEC(energy) }]}>
                 <Text style={S.eBadgeT}>{getEE(energy)} {energy}</Text>
@@ -905,6 +1430,11 @@ export default function App() {
             )}
           </View>
           <View style={S.headR}>
+            {supabaseKey && (
+              <TouchableOpacity style={S.headBtn} onPress={syncToCloud}>
+                <Text>{syncing ? '⏳' : '☁️'}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={S.headBtn} onPress={() => setShowContexts(true)}>
               <Text>📌</Text>
             </TouchableOpacity>
@@ -913,6 +1443,13 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* TRAVEL ALERT */}
+        {travelAlert && (
+          <View style={S.travelAlert}>
+            <Text style={S.travelAlertT}>🚗 {travelAlert}</Text>
+          </View>
+        )}
 
         {/* ENERGY SELECTOR */}
         {!energy && (
@@ -945,11 +1482,11 @@ export default function App() {
 
         {/* MAIN CONTENT */}
         <View style={S.main}>
-          
+
           {/* CONVERSATION VIEW */}
           {view === 'conversation' && (
             <>
-              <ScrollView 
+              <ScrollView
                 ref={scrollRef}
                 style={S.msgs}
                 onContentSizeChange={() => scrollRef.current?.scrollToEnd()}
@@ -957,7 +1494,7 @@ export default function App() {
                 {messages.map(msg => (
                   <View key={msg.id} style={[S.msg, msg.role === 'user' ? S.msgU : S.msgN]}>
                     <Text style={S.msgT}>{msg.content}</Text>
-                    {msg.model && thinkingMode !== 'off' && (
+                    {msg.model && profile.thinkingMode !== 'off' && (
                       <Text style={S.modelBadge}>
                         {msg.model === 'claude-sonnet' ? '🧠' : msg.model === 'local' ? '💭' : '⚡'}
                       </Text>
@@ -973,7 +1510,7 @@ export default function App() {
 
               <View style={S.inC}>
                 <View style={S.inR}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[S.iconBtn, listening && S.iconBtnA]}
                     onPress={startVoiceInput}
                   >
@@ -989,7 +1526,7 @@ export default function App() {
                     style={S.tIn}
                     value={input}
                     onChangeText={setInput}
-                    placeholder={`Talk to ${neroName}...`}
+                    placeholder={`Talk to ${profile.neroName}...`}
                     placeholderTextColor={C.textMuted}
                     multiline
                     onSubmitEditing={sendMessage}
@@ -1013,7 +1550,7 @@ export default function App() {
                     <Text style={S.oneT}>{nextTask.title}</Text>
                     {nextTask.isMicroStep && <Text style={S.microB}>✨ micro-step</Text>}
                   </View>
-                  
+
                   <View style={S.oneActs}>
                     <TouchableOpacity style={S.oneDone} onPress={() => completeTask(nextTask.id)}>
                       <Text style={S.oneDoneT}>✓ Done!</Text>
@@ -1056,7 +1593,7 @@ export default function App() {
                   <Text style={S.addBtnT}>+ Add</Text>
                 </TouchableOpacity>
               </View>
-              
+
               <View style={S.filterR}>
                 {(['all', 'low', 'medium', 'high'] as const).map(f => (
                   <TouchableOpacity
@@ -1074,7 +1611,7 @@ export default function App() {
               <ScrollView style={S.taskList}>
                 {filteredTasks.map(task => (
                   <View key={task.id} style={[S.taskI, task.isMicroStep && S.taskIMicro]}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={[S.chk, task.completed && S.chkD]}
                       onPress={() => completeTask(task.id)}
                     >
@@ -1108,18 +1645,25 @@ export default function App() {
           {view === 'timeline' && (
             <ScrollView style={S.timeC}>
               <Text style={S.timeTitle}>Today's Flow</Text>
-              <Text style={S.timeSubtitle}>{completedToday} tasks completed today</Text>
-              
-              {[6, 8, 10, 12, 14, 16, 18, 20, 22].map(hour => {
-                const isNow = new Date().getHours() === hour;
-                const isPast = new Date().getHours() > hour;
+              <Text style={S.timeSubtitle}>{completedToday} tasks completed • {calendarEvents.length} events</Text>
+
+              {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map(hour => {
+                const now = new Date();
+                const isNow = now.getHours() === hour;
+                const isPast = now.getHours() > hour;
+                const event = calendarEvents.find(e => {
+                  const start = new Date(e.start).getHours();
+                  return start === hour;
+                });
+
                 return (
                   <View key={hour} style={S.timeH}>
                     <Text style={[S.timeTm, isPast && S.timeTmPast]}>
-                      {hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`}
+                      {hour > 12 ? `${hour - 12}pm` : hour === 12 ? '12pm' : `${hour}am`}
                     </Text>
-                    <View style={[S.timeSlot, isNow && S.timeSlotNow]}>
+                    <View style={[S.timeSlot, isNow && S.timeSlotNow, event && { backgroundColor: event.color || C.primary + '40' }]}>
                       {isNow && <View style={S.curLine} />}
+                      {event && <Text style={S.timeEventT}>{event.title}</Text>}
                     </View>
                   </View>
                 );
@@ -1131,7 +1675,7 @@ export default function App() {
           {view === 'dashboard' && (
             <ScrollView style={S.dashC}>
               <Text style={S.dashT}>Your Progress</Text>
-              
+
               <View style={S.dashStats}>
                 <View style={S.dashS}>
                   <Text style={S.dashSV}>{stats.tasksCompleted}</Text>
@@ -1142,8 +1686,8 @@ export default function App() {
                   <Text style={S.dashSL}>Points</Text>
                 </View>
                 <View style={S.dashS}>
-                  <Text style={S.dashSV}>{stats.lowEnergyWins}</Text>
-                  <Text style={S.dashSL}>Low E Wins</Text>
+                  <Text style={S.dashSV}>{stats.streak}</Text>
+                  <Text style={S.dashSL}>Day Streak</Text>
                 </View>
               </View>
 
@@ -1153,8 +1697,8 @@ export default function App() {
                   <Text style={S.dashSL}>Days Active</Text>
                 </View>
                 <View style={S.dashS}>
-                  <Text style={S.dashSV}>{stats.tasksBreakdown}</Text>
-                  <Text style={S.dashSL}>Breakdowns</Text>
+                  <Text style={S.dashSV}>{stats.lowEnergyWins}</Text>
+                  <Text style={S.dashSL}>Low E Wins</Text>
                 </View>
                 <View style={S.dashS}>
                   <Text style={S.dashSV}>{completedToday}</Text>
@@ -1193,16 +1737,16 @@ export default function App() {
           {/* MINIMAL VIEW */}
           {view === 'minimal' && (
             <View style={S.minC}>
-              <Text style={S.minG}>Hey{userName ? `, ${userName}` : ''} 💙</Text>
+              <Text style={S.minG}>Hey{profile.name ? `, ${profile.name}` : ''} 💙</Text>
               <Text style={S.minM}>Take it easy. One tiny thing when you're ready.</Text>
-              
+
               {nextTask && (
                 <TouchableOpacity style={S.minTask} onPress={() => completeTask(nextTask.id)}>
                   <Text style={S.minTaskT}>{nextTask.title}</Text>
                   <Text style={S.minTaskH}>Tap when done</Text>
                 </TouchableOpacity>
               )}
-              
+
               <TouchableOpacity style={S.minEnergy} onPress={() => setEnergy(null)}>
                 <Text style={S.minEnergyT}>Change energy</Text>
               </TouchableOpacity>
@@ -1224,7 +1768,7 @@ export default function App() {
           ))}
         </View>
 
-        {/* ========== MODALS ========== */}
+        {/* ============ MODALS ============ */}
 
         {/* Add Task Modal */}
         <Modal visible={showAdd} transparent animationType="slide">
@@ -1388,7 +1932,7 @@ export default function App() {
   );
 }
 
-// ========== STYLES ==========
+// ============ STYLES ============
 const S = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   center: { justifyContent: 'center', alignItems: 'center' },
@@ -1438,17 +1982,17 @@ const S = StyleSheet.create({
   setOptT: { color: C.text, fontSize: 16, fontWeight: '500', flex: 1 },
   setOptD: { color: C.textSec, fontSize: 13 },
   setIn: { backgroundColor: C.card, borderRadius: 14, padding: 16, fontSize: 16, color: C.text },
+  setRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 8 },
   check: { color: C.primary, fontSize: 18, fontWeight: 'bold' },
   statsG: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  statI: { backgroundColor: C.card, borderRadius: 14, padding: 18, width: '48%', alignItems: 'center' },
-  statV: { color: C.text, fontSize: 28, fontWeight: 'bold' },
-  statL: { color: C.textSec, fontSize: 12, marginTop: 4 },
-  achRow: { flexDirection: 'row', gap: 8 },
-  achMini: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center' },
-  achMiniE: { fontSize: 20 },
-  achLocked: { opacity: 0.4 },
+  statI: { backgroundColor: C.card, borderRadius: 14, padding: 18, width: '31%', alignItems: 'center' },
+  statV: { color: C.text, fontSize: 24, fontWeight: 'bold' },
+  statL: { color: C.textSec, fontSize: 11, marginTop: 4, textAlign: 'center' },
   dangerBtn: { backgroundColor: C.error + '30', borderRadius: 14, padding: 16, alignItems: 'center' },
   dangerBtnT: { color: C.error, fontSize: 16, fontWeight: '600' },
+  syncBtn: { backgroundColor: C.primary, borderRadius: 14, padding: 16, alignItems: 'center', marginTop: 12 },
+  syncBtnT: { color: C.text, fontSize: 16, fontWeight: '600' },
+  lastSync: { color: C.textMuted, fontSize: 12, marginTop: 8, textAlign: 'center' },
 
   // Header
   head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.border },
@@ -1458,6 +2002,10 @@ const S = StyleSheet.create({
   headBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.card, justifyContent: 'center', alignItems: 'center' },
   eBadge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 },
   eBadgeT: { color: C.bg, fontSize: 12, fontWeight: '700' },
+
+  // Travel Alert
+  travelAlert: { backgroundColor: C.warning, padding: 12, marginHorizontal: 16, marginTop: 8, borderRadius: 12 },
+  travelAlertT: { color: C.bg, fontSize: 14, fontWeight: '600', textAlign: 'center' },
 
   // Energy Selector
   eSel: { backgroundColor: C.card, margin: 16, borderRadius: 18, padding: 18 },
@@ -1471,7 +2019,7 @@ const S = StyleSheet.create({
   bc: { backgroundColor: C.card, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, marginRight: 10 },
   bcT: { color: C.textSec, fontSize: 12 },
 
-  // Main Content
+  // Main
   main: { flex: 1 },
 
   // Messages
@@ -1544,26 +2092,27 @@ const S = StyleSheet.create({
   timeTitle: { color: C.text, fontSize: 22, fontWeight: '700', marginBottom: 6 },
   timeSubtitle: { color: C.textSec, fontSize: 14, marginBottom: 24 },
   timeH: { flexDirection: 'row', marginBottom: 4 },
-  timeTm: { width: 65, color: C.textSec, fontSize: 13 },
+  timeTm: { width: 50, color: C.textSec, fontSize: 12 },
   timeTmPast: { color: C.textMuted },
-  timeSlot: { flex: 1, height: 52, backgroundColor: C.card, borderRadius: 6, position: 'relative' },
+  timeSlot: { flex: 1, minHeight: 44, backgroundColor: C.card, borderRadius: 6, position: 'relative', justifyContent: 'center', paddingHorizontal: 10 },
   timeSlotNow: { backgroundColor: C.primary + '30', borderWidth: 1, borderColor: C.primary },
   curLine: { position: 'absolute', top: '50%', left: 0, right: 0, height: 2, backgroundColor: C.primary },
+  timeEventT: { color: C.text, fontSize: 13, fontWeight: '500' },
 
   // Dashboard
   dashC: { flex: 1, padding: 16 },
   dashT: { color: C.text, fontSize: 22, fontWeight: '700', marginBottom: 24 },
   dashStats: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 24 },
   dashS: { alignItems: 'center' },
-  dashSV: { color: C.text, fontSize: 34, fontWeight: 'bold' },
+  dashSV: { color: C.text, fontSize: 32, fontWeight: 'bold' },
   dashSL: { color: C.textSec, fontSize: 12, marginTop: 4 },
   achT: { color: C.text, fontSize: 18, fontWeight: '600', marginBottom: 18 },
   achG: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  achI: { backgroundColor: C.card, borderRadius: 14, padding: 16, width: '31%', alignItems: 'center' },
+  achI: { backgroundColor: C.card, borderRadius: 14, padding: 14, width: '31%', alignItems: 'center' },
   achIL: { opacity: 0.4 },
-  achE: { fontSize: 30, marginBottom: 10 },
-  achN: { color: C.text, fontSize: 11, textAlign: 'center', fontWeight: '500' },
-  achP: { color: C.gold, fontSize: 11, marginTop: 6, fontWeight: '600' },
+  achE: { fontSize: 28, marginBottom: 8 },
+  achN: { color: C.text, fontSize: 10, textAlign: 'center', fontWeight: '500' },
+  achP: { color: C.gold, fontSize: 10, marginTop: 4, fontWeight: '600' },
   thoughtI: { backgroundColor: C.card, borderRadius: 14, padding: 16, marginBottom: 10 },
   thoughtT: { color: C.text, fontSize: 14 },
   thoughtD: { color: C.textMuted, fontSize: 12, marginTop: 6 },
@@ -1578,10 +2127,10 @@ const S = StyleSheet.create({
   minEnergy: { marginTop: 36 },
   minEnergyT: { color: C.textMuted, fontSize: 14 },
 
-  // Bottom Nav
+  // Nav
   nav: { flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: C.border, paddingVertical: 10 },
   navI: { alignItems: 'center', padding: 8 },
-  navIA: { },
+  navIA: {},
   navE: { fontSize: 22 },
   navL: { color: C.textMuted, fontSize: 10, marginTop: 4, fontWeight: '600' },
   navLA: { color: C.primary },
