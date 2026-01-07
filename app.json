@@ -1,0 +1,83 @@
+{
+  "expo": {
+    "name": "UnFocused",
+    "slug": "unfocused",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "unfocused",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F0F1A"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "cloud.newbold.unfocused",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCalendarsUsageDescription": "UnFocused needs calendar access to sync your tasks and help you stay organized.",
+        "NSCalendarsFullAccessUsageDescription": "UnFocused needs calendar access to sync your tasks and help you stay organized.",
+        "NSMicrophoneUsageDescription": "UnFocused uses the microphone for voice input to quickly capture tasks.",
+        "NSSpeechRecognitionUsageDescription": "UnFocused uses speech recognition for voice commands.",
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
+      },
+      "config": {
+        "googleSignIn": {
+          "reservedClientId": "com.googleusercontent.apps.YOUR_IOS_CLIENT_ID"
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F0F1A"
+      },
+      "package": "cloud.newbold.unfocused",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ],
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#6C5CE7",
+          "sounds": ["./assets/notification-sound.wav"]
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow UnFocused to access your microphone for voice input."
+        }
+      ],
+      "expo-background-fetch"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "unfocused-adhd-app"
+      }
+    },
+    "owner": "justinnewbold"
+  }
+}

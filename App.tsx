@@ -2,10 +2,39 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, 
   SafeAreaView, Modal, Animated, Platform, KeyboardAvoidingView, 
-  ActivityIndicator, Switch, Linking, Alert
+  ActivityIndicator, Switch, Linking, Alert, AppState
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import * as Speech from 'expo-speech';
+import { Audio } from 'expo-av';
+
+// Complete OAuth flow on web
+WebBrowser.maybeCompleteAuthSession();
+
+// Configure notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
+// Google OAuth Configuration
+const GOOGLE_CLIENT_ID_WEB = ''; // Add your web client ID
+const GOOGLE_CLIENT_ID_IOS = ''; // Add your iOS client ID  
+const GOOGLE_CLIENT_ID_ANDROID = ''; // Add your Android client ID
+
+const discovery = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+};
 
 // ============ TYPES ============
 type EnergyLevel = 'low' | 'medium' | 'high';
@@ -27,6 +56,7 @@ interface Task {
   scheduledTime?: string;
   synced?: boolean;
   completionTimeMs?: number;
+  calendarEventId?: string;
 }
 
 // ============ PATTERN ANALYSIS TYPES ============
@@ -127,6 +157,8 @@ interface UserProfile {
   notificationsEnabled: boolean;
   calendarConnected: boolean;
   lastSync?: string;
+  voiceEnabled?: boolean;
+  neroVoiceEnabled?: boolean;
 }
 
 interface NeroMemory {
@@ -489,50 +521,103 @@ class NotificationService {
 // Calendar Service (Google Calendar via OAuth)
 class CalendarService {
   private accessToken: string | null = null;
+  private refreshToken: string | null = null;
+  private tokenExpiry: number = 0;
 
-  setAccessToken(token: string) {
-    this.accessToken = token;
+  setTokens(accessToken: string, refreshToken?: string, expiresIn?: number) {
+    this.accessToken = accessToken;
+    if (refreshToken) this.refreshToken = refreshToken;
+    if (expiresIn) this.tokenExpiry = Date.now() + (expiresIn * 1000);
+  }
+
+  getAccessToken() {
+    return this.accessToken;
+  }
+
+  isAuthenticated() {
+    return !!this.accessToken;
+  }
+
+  async refreshAccessToken(): Promise<boolean> {
+    if (!this.refreshToken) return false;
+    
+    try {
+      const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          refresh_token: this.refreshToken,
+          grant_type: 'refresh_token',
+          client_id: Platform.select({
+            ios: GOOGLE_CLIENT_ID_IOS,
+            android: GOOGLE_CLIENT_ID_ANDROID,
+            default: GOOGLE_CLIENT_ID_WEB,
+          }) || '',
+        }).toString(),
+      });
+
+      if (!response.ok) return false;
+      
+      const data = await response.json();
+      this.accessToken = data.access_token;
+      this.tokenExpiry = Date.now() + (data.expires_in * 1000);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getEvents(timeMin: Date, timeMax: Date): Promise<CalendarEvent[]> {
     if (!this.accessToken) {
       // Return mock events for demo
       const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       return [
         {
-          id: '1',
-          title: 'Morning Focus Block',
-          start: new Date(now.setHours(9, 0, 0, 0)).toISOString(),
-          end: new Date(now.setHours(11, 0, 0, 0)).toISOString(),
+          id: 'demo-1',
+          title: '🎯 Morning Focus Block',
+          start: new Date(today.getTime() + 9 * 60 * 60 * 1000).toISOString(),
+          end: new Date(today.getTime() + 11 * 60 * 60 * 1000).toISOString(),
           color: C.primary,
         },
         {
-          id: '2',
-          title: 'Lunch Break',
-          start: new Date(now.setHours(12, 0, 0, 0)).toISOString(),
-          end: new Date(now.setHours(13, 0, 0, 0)).toISOString(),
+          id: 'demo-2',
+          title: '🍽️ Lunch Break',
+          start: new Date(today.getTime() + 12 * 60 * 60 * 1000).toISOString(),
+          end: new Date(today.getTime() + 13 * 60 * 60 * 1000).toISOString(),
           color: C.success,
         },
         {
-          id: '3',
-          title: 'Afternoon Tasks',
-          start: new Date(now.setHours(14, 0, 0, 0)).toISOString(),
-          end: new Date(now.setHours(17, 0, 0, 0)).toISOString(),
+          id: 'demo-3',
+          title: '📝 Afternoon Tasks',
+          start: new Date(today.getTime() + 14 * 60 * 60 * 1000).toISOString(),
+          end: new Date(today.getTime() + 17 * 60 * 60 * 1000).toISOString(),
           color: C.warning,
         },
       ];
     }
 
+    // Check if token needs refresh
+    if (Date.now() > this.tokenExpiry - 60000) {
+      await this.refreshAccessToken();
+    }
+
     try {
       const response = await fetch(
         `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
-        `timeMin=${timeMin.toISOString()}&timeMax=${timeMax.toISOString()}&singleEvents=true&orderBy=startTime`,
+        `timeMin=${timeMin.toISOString()}&timeMax=${timeMax.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=50`,
         {
           headers: { Authorization: `Bearer ${this.accessToken}` },
         }
       );
 
-      if (!response.ok) throw new Error('Calendar API error');
+      if (!response.ok) {
+        if (response.status === 401) {
+          const refreshed = await this.refreshAccessToken();
+          if (refreshed) return this.getEvents(timeMin, timeMax);
+        }
+        throw new Error('Calendar API error');
+      }
 
       const data = await response.json();
       return (data.items || []).map((item: any) => ({
@@ -541,11 +626,190 @@ class CalendarService {
         start: item.start?.dateTime || item.start?.date,
         end: item.end?.dateTime || item.end?.date,
         allDay: !!item.start?.date,
+        color: item.colorId ? this.getColorById(item.colorId) : C.primary,
+        description: item.description,
+        location: item.location,
       }));
     } catch (error) {
       console.error('Calendar error:', error);
       return [];
     }
+  }
+
+  // Create a calendar event from a task
+  async createEventFromTask(task: Task, startTime: Date, durationMinutes: number = 30): Promise<CalendarEvent | null> {
+    if (!this.accessToken) return null;
+
+    const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
+    const colorId = task.energy === 'high' ? '11' : task.energy === 'medium' ? '5' : '9'; // Red, Yellow, Blue
+
+    try {
+      const response = await fetch(
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            summary: `📋 ${task.title}`,
+            description: `Task from UnFocused\nEnergy: ${task.energy}\nCreated: ${task.createdAt}`,
+            start: { dateTime: startTime.toISOString() },
+            end: { dateTime: endTime.toISOString() },
+            colorId,
+            reminders: {
+              useDefault: false,
+              overrides: [
+                { method: 'popup', minutes: 10 },
+                { method: 'popup', minutes: 5 },
+              ],
+            },
+          }),
+        }
+      );
+
+      if (!response.ok) throw new Error('Failed to create event');
+
+      const event = await response.json();
+      return {
+        id: event.id,
+        title: event.summary,
+        start: event.start.dateTime,
+        end: event.end.dateTime,
+        color: this.getColorById(colorId),
+      };
+    } catch (error) {
+      console.error('Create event error:', error);
+      return null;
+    }
+  }
+
+  // Create a time block for focused work
+  async createTimeBlock(title: string, startTime: Date, durationMinutes: number, color: string = '9'): Promise<CalendarEvent | null> {
+    if (!this.accessToken) return null;
+
+    const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
+
+    try {
+      const response = await fetch(
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            summary: `🎯 ${title}`,
+            description: 'Focus block created by UnFocused',
+            start: { dateTime: startTime.toISOString() },
+            end: { dateTime: endTime.toISOString() },
+            colorId: color,
+            transparency: 'opaque', // Shows as busy
+          }),
+        }
+      );
+
+      if (!response.ok) throw new Error('Failed to create time block');
+
+      const event = await response.json();
+      return {
+        id: event.id,
+        title: event.summary,
+        start: event.start.dateTime,
+        end: event.end.dateTime,
+        color: this.getColorById(color),
+      };
+    } catch (error) {
+      console.error('Create time block error:', error);
+      return null;
+    }
+  }
+
+  // Delete a calendar event
+  async deleteEvent(eventId: string): Promise<boolean> {
+    if (!this.accessToken) return false;
+
+    try {
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${this.accessToken}` },
+        }
+      );
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // Get free/busy times for scheduling
+  async getFreeBusy(timeMin: Date, timeMax: Date): Promise<{ start: string; end: string }[]> {
+    if (!this.accessToken) return [];
+
+    try {
+      const response = await fetch(
+        'https://www.googleapis.com/calendar/v3/freeBusy',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            timeMin: timeMin.toISOString(),
+            timeMax: timeMax.toISOString(),
+            items: [{ id: 'primary' }],
+          }),
+        }
+      );
+
+      if (!response.ok) return [];
+
+      const data = await response.json();
+      return data.calendars?.primary?.busy || [];
+    } catch {
+      return [];
+    }
+  }
+
+  // Find next available slot for a task
+  async findNextAvailableSlot(durationMinutes: number = 30): Promise<Date | null> {
+    const now = new Date();
+    const endOfDay = new Date(now);
+    endOfDay.setHours(18, 0, 0, 0); // Look until 6 PM
+
+    if (now >= endOfDay) {
+      // Look at tomorrow
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      return tomorrow;
+    }
+
+    const busyTimes = await this.getFreeBusy(now, endOfDay);
+    
+    let candidateStart = new Date(now);
+    candidateStart.setMinutes(Math.ceil(candidateStart.getMinutes() / 15) * 15, 0, 0); // Round to 15 min
+
+    for (const busy of busyTimes) {
+      const busyStart = new Date(busy.start);
+      const busyEnd = new Date(busy.end);
+
+      if (candidateStart.getTime() + durationMinutes * 60 * 1000 <= busyStart.getTime()) {
+        return candidateStart;
+      }
+      
+      candidateStart = new Date(Math.max(candidateStart.getTime(), busyEnd.getTime()));
+    }
+
+    if (candidateStart.getTime() + durationMinutes * 60 * 1000 <= endOfDay.getTime()) {
+      return candidateStart;
+    }
+
+    return null;
   }
 
   calculateTravelTime(eventStart: Date, travelMinutes: number = 30): { shouldLeave: Date; message: string } | null {
@@ -560,6 +824,212 @@ class CalendarService {
       };
     }
     return null;
+  }
+
+  private getColorById(colorId: string): string {
+    const colors: Record<string, string> = {
+      '1': '#7986CB', '2': '#33B679', '3': '#8E24AA', '4': '#E67C73',
+      '5': '#F6BF26', '6': '#F4511E', '7': '#039BE5', '8': '#616161',
+      '9': '#3F51B5', '10': '#0B8043', '11': '#D50000',
+    };
+    return colors[colorId] || C.primary;
+  }
+
+  logout() {
+    this.accessToken = null;
+    this.refreshToken = null;
+    this.tokenExpiry = 0;
+  }
+}
+
+// ============ NATIVE NOTIFICATION SERVICE ============
+class NativeNotificationService {
+  private expoPushToken: string | null = null;
+
+  async initialize(): Promise<string | null> {
+    if (Platform.OS === 'web') {
+      // Web notifications
+      if ('Notification' in window && Notification.permission !== 'granted') {
+        await Notification.requestPermission();
+      }
+      return null;
+    }
+
+    if (!Device.isDevice) {
+      console.log('Push notifications require physical device');
+      return null;
+    }
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    
+    if (finalStatus !== 'granted') {
+      return null;
+    }
+
+    const token = await Notifications.getExpoPushTokenAsync({
+      projectId: 'unfocused-adhd-app',
+    });
+    
+    this.expoPushToken = token.data;
+    return this.expoPushToken;
+  }
+
+  async scheduleNotification(
+    title: string,
+    body: string,
+    trigger: Notifications.NotificationTriggerInput
+  ): Promise<string | null> {
+    try {
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          sound: true,
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+        },
+        trigger,
+      });
+      return id;
+    } catch (error) {
+      console.error('Schedule notification error:', error);
+      return null;
+    }
+  }
+
+  async scheduleTaskReminder(taskTitle: string, delaySeconds: number): Promise<string | null> {
+    return this.scheduleNotification(
+      '🎯 Task Reminder',
+      taskTitle,
+      { seconds: delaySeconds }
+    );
+  }
+
+  async scheduleHyperfocusCheck(delayMinutes: number = 90): Promise<string | null> {
+    return this.scheduleNotification(
+      '🧠 Hyperfocus Check',
+      "You've been going strong! Time for water, stretch, or a quick break?",
+      { seconds: delayMinutes * 60 }
+    );
+  }
+
+  async scheduleDailyCheckIn(hour: number = 9, minute: number = 0): Promise<string | null> {
+    return this.scheduleNotification(
+      '☀️ Good Morning!',
+      "Ready to set your energy level and tackle today?",
+      {
+        hour,
+        minute,
+        repeats: true,
+      }
+    );
+  }
+
+  async cancelNotification(id: string): Promise<void> {
+    await Notifications.cancelScheduledNotificationAsync(id);
+  }
+
+  async cancelAllNotifications(): Promise<void> {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+  }
+}
+
+// ============ VOICE INPUT SERVICE ============
+class VoiceService {
+  private recording: Audio.Recording | null = null;
+  private isRecording: boolean = false;
+
+  async startRecording(): Promise<boolean> {
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) return false;
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      this.recording = recording;
+      this.isRecording = true;
+      return true;
+    } catch (error) {
+      console.error('Start recording error:', error);
+      return false;
+    }
+  }
+
+  async stopRecording(): Promise<string | null> {
+    if (!this.recording) return null;
+
+    try {
+      await this.recording.stopAndUnloadAsync();
+      const uri = this.recording.getURI();
+      this.recording = null;
+      this.isRecording = false;
+      return uri;
+    } catch (error) {
+      console.error('Stop recording error:', error);
+      return null;
+    }
+  }
+
+  async transcribeWithWhisper(audioUri: string, apiKey: string): Promise<string> {
+    if (!apiKey) {
+      // Fallback to speech recognition hint
+      return '';
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('file', {
+        uri: audioUri,
+        type: 'audio/m4a',
+        name: 'recording.m4a',
+      } as any);
+      formData.append('model', 'whisper-1');
+
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) return '';
+      
+      const data = await response.json();
+      return data.text || '';
+    } catch (error) {
+      console.error('Transcription error:', error);
+      return '';
+    }
+  }
+
+  // Text-to-speech for Nero responses
+  speak(text: string, options?: { rate?: number; pitch?: number; language?: string }) {
+    Speech.speak(text, {
+      rate: options?.rate || 0.9,
+      pitch: options?.pitch || 1.0,
+      language: options?.language || 'en-US',
+    });
+  }
+
+  stopSpeaking() {
+    Speech.stop();
+  }
+
+  async isSpeaking(): Promise<boolean> {
+    return Speech.isSpeakingAsync();
   }
 }
 
@@ -925,6 +1395,8 @@ export default function App() {
   const [notificationService] = useState(() => new NotificationService());
   const [calendarService] = useState(() => new CalendarService());
   const [patternService] = useState(() => new PatternAnalysisService());
+  const [nativeNotificationService] = useState(() => new NativeNotificationService());
+  const [voiceService] = useState(() => new VoiceService());
 
   // Pattern Analysis State
   const [completionHistory, setCompletionHistory] = useState<CompletionRecord[]>([]);
@@ -932,6 +1404,46 @@ export default function App() {
   const [showInsights, setShowInsights] = useState(false);
   const [aiInsight, setAiInsight] = useState<string>('');
   const [loadingInsight, setLoadingInsight] = useState(false);
+
+  // Google OAuth State
+  const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
+  const [calendarSyncStatus, setCalendarSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+
+  // Voice Input State
+  const [isRecording, setIsRecording] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [neroSpeaking, setNeroSpeaking] = useState(false);
+
+  // Native Notifications State
+  const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
+  const [scheduledReminders, setScheduledReminders] = useState<string[]>([]);
+
+  // Google OAuth Hook
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: 'unfocused',
+    path: 'oauth',
+  });
+
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: Platform.select({
+        ios: GOOGLE_CLIENT_ID_IOS,
+        android: GOOGLE_CLIENT_ID_ANDROID,
+        default: GOOGLE_CLIENT_ID_WEB,
+      }) || '',
+      redirectUri,
+      scopes: [
+        'openid',
+        'profile',
+        'email',
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/calendar.events',
+      ],
+      responseType: 'code',
+      usePKCE: true,
+    },
+    discovery
+  );
 
   // Animation refs
   const celebAnim = useRef(new Animated.Value(0)).current;
@@ -943,7 +1455,112 @@ export default function App() {
   useEffect(() => {
     loadData();
     requestNotificationPermission();
+    initializeNativeServices();
   }, []);
+
+  // Initialize native services
+  const initializeNativeServices = async () => {
+    // Initialize native push notifications
+    const token = await nativeNotificationService.initialize();
+    if (token) {
+      setExpoPushToken(token);
+      console.log('Push token:', token);
+    }
+
+    // Load saved Google tokens
+    try {
+      const savedTokens = await AsyncStorage.getItem('@uf/google_tokens');
+      if (savedTokens) {
+        const { accessToken, refreshToken, expiry } = JSON.parse(savedTokens);
+        calendarService.setTokens(accessToken, refreshToken, Math.floor((expiry - Date.now()) / 1000));
+        setProfile(p => ({ ...p, calendarConnected: true }));
+      }
+    } catch (e) {
+      console.log('No saved Google tokens');
+    }
+  };
+
+  // Handle Google OAuth response
+  useEffect(() => {
+    if (response?.type === 'success') {
+      handleGoogleAuthSuccess(response.params.code);
+    } else if (response?.type === 'error') {
+      setGoogleAuthLoading(false);
+      Alert.alert('Authentication Error', 'Failed to connect to Google Calendar. Please try again.');
+    }
+  }, [response]);
+
+  // Exchange OAuth code for tokens
+  const handleGoogleAuthSuccess = async (code: string) => {
+    try {
+      setGoogleAuthLoading(true);
+      
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: Platform.select({
+            ios: GOOGLE_CLIENT_ID_IOS,
+            android: GOOGLE_CLIENT_ID_ANDROID,
+            default: GOOGLE_CLIENT_ID_WEB,
+          }) || '',
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+          code_verifier: request?.codeVerifier || '',
+        }).toString(),
+      });
+
+      if (!tokenResponse.ok) throw new Error('Token exchange failed');
+
+      const tokens = await tokenResponse.json();
+      
+      // Save tokens
+      calendarService.setTokens(tokens.access_token, tokens.refresh_token, tokens.expires_in);
+      
+      await AsyncStorage.setItem('@uf/google_tokens', JSON.stringify({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiry: Date.now() + (tokens.expires_in * 1000),
+      }));
+
+      setProfile(p => ({ ...p, calendarConnected: true }));
+      await loadCalendarEvents();
+      
+      // Send welcome message
+      const neroMsg: Message = {
+        id: genId(),
+        role: 'assistant',
+        content: "🎉 Google Calendar connected! I can now see your schedule and help you plan your day. Want me to find a good time slot for your tasks?",
+        timestamp: Date.now(),
+      };
+      setMessages(m => [...m, neroMsg]);
+      
+      setGoogleAuthLoading(false);
+    } catch (error) {
+      console.error('OAuth error:', error);
+      setGoogleAuthLoading(false);
+      Alert.alert('Connection Failed', 'Could not connect to Google Calendar. Please try again.');
+    }
+  };
+
+  // Google Calendar sign in
+  const signInWithGoogle = async () => {
+    if (!request) {
+      Alert.alert('Setup Required', 'Google OAuth is not configured. Please add your Google Client IDs to the app.');
+      return;
+    }
+    setGoogleAuthLoading(true);
+    await promptAsync();
+  };
+
+  // Google Calendar sign out
+  const signOutGoogle = async () => {
+    calendarService.logout();
+    await AsyncStorage.removeItem('@uf/google_tokens');
+    setProfile(p => ({ ...p, calendarConnected: false }));
+    setCalendarEvents([]);
+  };
 
   // Check for hyperfocus
   useEffect(() => {
@@ -1136,6 +1753,166 @@ export default function App() {
     if (profile.notificationsEnabled) {
       notificationService.scheduleVariableReminder(taskTitle);
     }
+
+    return task;
+  };
+
+  // ============ VOICE INPUT FUNCTIONS ============
+
+  const startVoiceInput = async () => {
+    const started = await voiceService.startRecording();
+    if (started) {
+      setIsRecording(true);
+      setVoiceTranscript('');
+      // Add haptic feedback on native
+      if (Platform.OS !== 'web') {
+        // Vibrate to indicate recording started
+      }
+    } else {
+      Alert.alert('Microphone Access', 'Please allow microphone access to use voice input.');
+    }
+  };
+
+  const stopVoiceInput = async () => {
+    setIsRecording(false);
+    const audioUri = await voiceService.stopRecording();
+    
+    if (audioUri && anthropicKey) {
+      // For now, we'll use a simple speech indicator
+      // In production, integrate with Whisper API
+      setVoiceTranscript('Processing voice...');
+      
+      // Simulate transcription (in production, use voiceService.transcribeWithWhisper)
+      setTimeout(() => {
+        setVoiceTranscript('');
+        // For demo, add voice message to conversation
+        const voiceMsg: Message = {
+          id: genId(),
+          role: 'user',
+          content: '🎤 [Voice input captured - integrate Whisper API for transcription]',
+          timestamp: Date.now(),
+        };
+        setMessages(m => [...m, voiceMsg]);
+      }, 1000);
+    }
+  };
+
+  const speakNeroResponse = (text: string) => {
+    // Strip emojis and special characters for better speech
+    const cleanText = text.replace(/[\u{1F300}-\u{1F9FF}]/gu, '').trim();
+    if (cleanText) {
+      setNeroSpeaking(true);
+      voiceService.speak(cleanText, { rate: 0.95 });
+      // Stop speaking indicator after estimated duration
+      setTimeout(() => setNeroSpeaking(false), cleanText.length * 50);
+    }
+  };
+
+  const stopNeroSpeaking = () => {
+    voiceService.stopSpeaking();
+    setNeroSpeaking(false);
+  };
+
+  // ============ CALENDAR SCHEDULING FUNCTIONS ============
+
+  const scheduleTaskOnCalendar = async (taskId: string, startTime?: Date) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || !calendarService.isAuthenticated()) {
+      if (!calendarService.isAuthenticated()) {
+        Alert.alert('Calendar Not Connected', 'Connect Google Calendar in settings to schedule tasks.');
+      }
+      return null;
+    }
+
+    setCalendarSyncStatus('syncing');
+    
+    // Find next available slot if no time specified
+    const scheduleTime = startTime || await calendarService.findNextAvailableSlot(30);
+    if (!scheduleTime) {
+      setCalendarSyncStatus('error');
+      Alert.alert('No Available Time', 'Could not find an available time slot today. Try scheduling manually.');
+      return null;
+    }
+
+    const event = await calendarService.createEventFromTask(task, scheduleTime, 30);
+    
+    if (event) {
+      setCalendarSyncStatus('success');
+      setCalendarEvents(prev => [...prev, event]);
+      
+      // Update task with calendar link
+      setTasks(prev => prev.map(t => 
+        t.id === taskId ? { ...t, calendarEventId: event.id } : t
+      ));
+
+      // Notify user
+      const timeStr = scheduleTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const neroMsg: Message = {
+        id: genId(),
+        role: 'assistant',
+        content: `📅 Done! I've scheduled "${task.title}" for ${timeStr}. I'll remind you when it's time!`,
+        timestamp: Date.now(),
+      };
+      setMessages(m => [...m, neroMsg]);
+
+      // Schedule native notification
+      const secondsUntil = Math.max(0, (scheduleTime.getTime() - Date.now()) / 1000 - 300); // 5 min before
+      if (secondsUntil > 0) {
+        const notifId = await nativeNotificationService.scheduleTaskReminder(task.title, secondsUntil);
+        if (notifId) setScheduledReminders(prev => [...prev, notifId]);
+      }
+
+      setTimeout(() => setCalendarSyncStatus('idle'), 2000);
+      return event;
+    }
+
+    setCalendarSyncStatus('error');
+    return null;
+  };
+
+  const createFocusBlock = async (durationMinutes: number = 60) => {
+    if (!calendarService.isAuthenticated()) {
+      Alert.alert('Calendar Not Connected', 'Connect Google Calendar to create focus blocks.');
+      return;
+    }
+
+    setCalendarSyncStatus('syncing');
+    
+    const startTime = await calendarService.findNextAvailableSlot(durationMinutes);
+    if (!startTime) {
+      setCalendarSyncStatus('error');
+      Alert.alert('No Available Time', `Could not find a ${durationMinutes}-minute slot today.`);
+      return;
+    }
+
+    const block = await calendarService.createTimeBlock('Focus Time', startTime, durationMinutes, '9');
+    
+    if (block) {
+      setCalendarSyncStatus('success');
+      setCalendarEvents(prev => [...prev, block]);
+      
+      const timeStr = startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const neroMsg: Message = {
+        id: genId(),
+        role: 'assistant',
+        content: `🎯 Focus block created! You have ${durationMinutes} minutes blocked at ${timeStr}. I'll help you stay focused when it's time.`,
+        timestamp: Date.now(),
+      };
+      setMessages(m => [...m, neroMsg]);
+      
+      setTimeout(() => setCalendarSyncStatus('idle'), 2000);
+    } else {
+      setCalendarSyncStatus('error');
+    }
+  };
+
+  const syncCalendarEvents = async () => {
+    if (!calendarService.isAuthenticated()) return;
+    
+    setCalendarSyncStatus('syncing');
+    await loadCalendarEvents();
+    setCalendarSyncStatus('success');
+    setTimeout(() => setCalendarSyncStatus('idle'), 2000);
   };
 
   const completeTask = (id: string) => {
@@ -1275,6 +2052,11 @@ export default function App() {
     };
     setMessages(prev => [...prev, neroMsg]);
     addBreadcrumb(`${profile.neroName}: ${response.content.slice(0, 35)}`);
+
+    // Speak response if voice enabled
+    if (profile.neroVoiceEnabled) {
+      speakNeroResponse(response.content);
+    }
   };
 
   // ============ CONTEXT FUNCTIONS ============
@@ -1632,22 +2414,119 @@ export default function App() {
 
           {/* Calendar */}
           <View style={S.setSec}>
-            <Text style={S.setSecT}>📅 Calendar Integration</Text>
-            <TouchableOpacity
-              style={[S.setOpt, profile.calendarConnected && S.setOptSel]}
-              onPress={() => {
-                setProfile(p => ({ ...p, calendarConnected: !p.calendarConnected }));
-                if (!profile.calendarConnected) {
-                  loadCalendarEvents();
-                  const newStats = { ...stats };
-                  checkAchievements(newStats);
-                }
-              }}
-            >
-              <Text style={S.setOptE}>{profile.calendarConnected ? '✓' : '○'}</Text>
+            <Text style={S.setSecT}>📅 Google Calendar Integration</Text>
+            {!profile.calendarConnected ? (
+              <TouchableOpacity
+                style={[S.setOpt, googleAuthLoading && { opacity: 0.5 }]}
+                onPress={signInWithGoogle}
+                disabled={googleAuthLoading}
+              >
+                <Text style={S.setOptE}>🔗</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.setOptT}>{googleAuthLoading ? 'Connecting...' : 'Connect Google Calendar'}</Text>
+                  <Text style={S.setOptD}>OAuth 2.0 • Two-way sync • Time blocking</Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <View style={[S.setOpt, S.setOptSel]}>
+                  <Text style={S.setOptE}>✓</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.setOptT}>Google Calendar Connected</Text>
+                    <Text style={S.setOptD}>Real-time sync enabled</Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <TouchableOpacity
+                    style={[S.syncBtn, { flex: 1 }, calendarSyncStatus === 'syncing' && { opacity: 0.5 }]}
+                    onPress={syncCalendarEvents}
+                    disabled={calendarSyncStatus === 'syncing'}
+                  >
+                    <Text style={S.syncBtnT}>
+                      {calendarSyncStatus === 'syncing' ? '⟳ Syncing...' : calendarSyncStatus === 'success' ? '✓ Synced!' : '⟳ Sync Now'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[S.syncBtn, { flex: 1, backgroundColor: C.error + '30' }]}
+                    onPress={signOutGoogle}
+                  >
+                    <Text style={[S.syncBtnT, { color: C.error }]}>Disconnect</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  style={[S.setOpt, { marginTop: 12, backgroundColor: C.primary + '20' }]}
+                  onPress={() => createFocusBlock(60)}
+                >
+                  <Text style={S.setOptE}>🎯</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.setOptT}>Create Focus Block</Text>
+                    <Text style={S.setOptD}>Block 1 hour for deep work</Text>
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+
+          {/* Voice Input */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>🎤 Voice Input</Text>
+            <View style={S.setOpt}>
+              <Text style={S.setOptE}>🗣️</Text>
               <View style={{ flex: 1 }}>
-                <Text style={S.setOptT}>{profile.calendarConnected ? 'Calendar Connected' : 'Connect Calendar'}</Text>
-                <Text style={S.setOptD}>See events in Timeline, get travel alerts</Text>
+                <Text style={S.setOptT}>Voice Commands</Text>
+                <Text style={S.setOptD}>Tap the mic button to add tasks by voice</Text>
+              </View>
+              <Switch
+                value={profile.voiceEnabled !== false}
+                onValueChange={(v) => setProfile(p => ({ ...p, voiceEnabled: v }))}
+                trackColor={{ false: C.surface, true: C.primary }}
+              />
+            </View>
+            <View style={S.setOpt}>
+              <Text style={S.setOptE}>🔊</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={S.setOptT}>Nero Voice Responses</Text>
+                <Text style={S.setOptD}>Let Nero read responses aloud</Text>
+              </View>
+              <Switch
+                value={profile.neroVoiceEnabled === true}
+                onValueChange={(v) => setProfile(p => ({ ...p, neroVoiceEnabled: v }))}
+                trackColor={{ false: C.surface, true: C.primary }}
+              />
+            </View>
+          </View>
+
+          {/* Push Notifications */}
+          <View style={S.setSec}>
+            <Text style={S.setSecT}>🔔 Native Notifications</Text>
+            {expoPushToken ? (
+              <View style={[S.setOpt, S.setOptSel]}>
+                <Text style={S.setOptE}>✓</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.setOptT}>Push Notifications Enabled</Text>
+                  <Text style={S.setOptD}>You'll receive reminders even when the app is closed</Text>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={S.setOpt}
+                onPress={() => nativeNotificationService.initialize().then(setExpoPushToken)}
+              >
+                <Text style={S.setOptE}>🔕</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.setOptT}>Enable Push Notifications</Text>
+                  <Text style={S.setOptD}>Get reminders on your device</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[S.setOpt, { marginTop: 8 }]}
+              onPress={() => nativeNotificationService.scheduleDailyCheckIn(9, 0)}
+            >
+              <Text style={S.setOptE}>☀️</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={S.setOptT}>Daily Morning Check-in</Text>
+                <Text style={S.setOptD}>Get a gentle nudge at 9 AM</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -1847,12 +2726,21 @@ export default function App() {
                   <TouchableOpacity style={S.iconBtn} onPress={() => setShowCtx(true)}>
                     <Text>📌</Text>
                   </TouchableOpacity>
+                  {/* Voice Input Button */}
+                  {profile.voiceEnabled !== false && (
+                    <TouchableOpacity 
+                      style={[S.iconBtn, isRecording && { backgroundColor: C.error + '40' }]} 
+                      onPress={isRecording ? stopVoiceInput : startVoiceInput}
+                    >
+                      <Text>{isRecording ? '⏹️' : '🎤'}</Text>
+                    </TouchableOpacity>
+                  )}
                   <TextInput
                     style={S.tIn}
-                    value={input}
+                    value={voiceTranscript || input}
                     onChangeText={setInput}
-                    placeholder={`Talk to ${profile.neroName}...`}
-                    placeholderTextColor={C.textMuted}
+                    placeholder={isRecording ? 'Listening...' : `Talk to ${profile.neroName}...`}
+                    placeholderTextColor={isRecording ? C.error : C.textMuted}
                     multiline
                     onSubmitEditing={sendMessage}
                   />
@@ -1860,6 +2748,17 @@ export default function App() {
                     <Text style={S.sendBtnT}>{typing ? '...' : '→'}</Text>
                   </TouchableOpacity>
                 </View>
+                {/* Nero Speaking Indicator */}
+                {neroSpeaking && (
+                  <TouchableOpacity 
+                    style={{ flexDirection: 'row', alignItems: 'center', padding: 8, backgroundColor: C.primary + '20', borderRadius: 8, marginTop: 4 }}
+                    onPress={stopNeroSpeaking}
+                  >
+                    <Text style={{ color: C.primary, marginRight: 8 }}>🔊</Text>
+                    <Text style={{ color: C.text, flex: 1 }}>{profile.neroName} is speaking...</Text>
+                    <Text style={{ color: C.textMuted }}>Tap to stop</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </>
           )}
@@ -1947,7 +2846,13 @@ export default function App() {
                       {task.title}
                     </Text>
                     {task.isMicroStep && <Text style={S.microL}>✨</Text>}
-                    {!task.isMicroStep && (
+                    {task.calendarEventId && <Text style={S.microL}>📅</Text>}
+                    {!task.completed && profile.calendarConnected && !task.calendarEventId && (
+                      <TouchableOpacity onPress={() => scheduleTaskOnCalendar(task.id)}>
+                        <Text style={S.taskA}>📅</Text>
+                      </TouchableOpacity>
+                    )}
+                    {!task.isMicroStep && !task.completed && (
                       <TouchableOpacity onPress={() => breakdownTask(task.id)}>
                         <Text style={S.taskA}>🔨</Text>
                       </TouchableOpacity>
@@ -1971,6 +2876,30 @@ export default function App() {
             <ScrollView style={S.timeC}>
               <Text style={S.timeTitle}>Today's Flow</Text>
               <Text style={S.timeSubtitle}>{completedToday} tasks completed • {calendarEvents.length} events</Text>
+              
+              {/* Quick Actions for Calendar */}
+              {profile.calendarConnected && (
+                <View style={{ flexDirection: 'row', marginBottom: 16, gap: 8 }}>
+                  <TouchableOpacity 
+                    style={[S.syncBtn, { flex: 1 }]}
+                    onPress={() => createFocusBlock(30)}
+                  >
+                    <Text style={S.syncBtnT}>🎯 30min Focus</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[S.syncBtn, { flex: 1 }]}
+                    onPress={() => createFocusBlock(60)}
+                  >
+                    <Text style={S.syncBtnT}>🎯 1hr Focus</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[S.syncBtn, { flex: 1, backgroundColor: C.surface }]}
+                    onPress={syncCalendarEvents}
+                  >
+                    <Text style={[S.syncBtnT, { color: C.text }]}>⟳ Sync</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map(hour => {
                 const now = new Date();

@@ -1,6 +1,6 @@
 {
   "name": "unfocused",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -8,13 +8,27 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build": "expo export -p web",
-    "build:web": "expo export -p web"
+    "build:web": "expo export -p web",
+    "build:ios": "eas build --platform ios",
+    "build:android": "eas build --platform android",
+    "submit:ios": "eas submit --platform ios",
+    "submit:android": "eas submit --platform android"
   },
   "dependencies": {
     "@expo/metro-runtime": "^4.0.1",
     "@react-native-async-storage/async-storage": "^2.1.0",
     "expo": "~52.0.0",
+    "expo-auth-session": "~6.0.0",
+    "expo-av": "~15.0.0",
+    "expo-background-fetch": "~13.0.0",
+    "expo-crypto": "~14.0.0",
+    "expo-device": "~7.0.0",
+    "expo-linking": "~7.0.0",
+    "expo-notifications": "~0.29.0",
+    "expo-speech": "~13.0.0",
     "expo-status-bar": "~2.0.0",
+    "expo-task-manager": "~12.0.0",
+    "expo-web-browser": "~14.0.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-native": "0.76.3",

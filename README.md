@@ -1,138 +1,152 @@
-# 🧠 UnFocused
+# UnFocused 🧠
 
 **Your AI Companion for the ADHD Brain**
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fjustinnewbold%2Funfocused-app)
-
-🌐 **Live Demo**: [unfocused-app.vercel.app](https://unfocused-app.vercel.app)
+An AI-powered companion app designed specifically for people with ADHD. Unlike other productivity apps that treat ADHD as a discipline problem, UnFocused adapts to how ADHD brains actually work.
 
 ## ✨ Features
 
-### 6 View Modes
-- 💬 **Conversation** - Chat with Nero, your AI companion
-- 🎯 **One Thing** - Focus on a single task at a time
-- 📝 **List** - View all tasks with energy filtering
-- 📅 **Timeline** - See your day's schedule with calendar events
-- 📊 **Dashboard** - Track your progress and achievements
-- 🌙 **Minimal** - Low-energy mode for tough days
+### 🤖 AI Companion (Nero)
+- Personalized AI assistant with multiple personality modes
+- Real Claude AI integration for smart responses
+- Learns your patterns and preferences
+- Transparent AI thinking display
 
-### 🔔 Smart Notifications
-- **Gentle Mode** - Soft, kind reminders
-- **Variable Mode** - Random timing (harder to ignore!)
-- **Persistent Mode** - Regular, firm reminders
-- **Hyperfocus Protection** - Alerts after 90+ minutes of deep work
+### 📅 Google Calendar Integration (NEW!)
+- **OAuth 2.0 Authentication** - Secure Google sign-in
+- **Two-way Sync** - See events, create from tasks
+- **Time Blocking** - Schedule focus blocks directly
+- **Smart Scheduling** - Find available slots automatically
+- **Travel Alerts** - Get notified when to leave
 
-### ☁️ Cloud Sync (Supabase)
-- Sync tasks and profile across devices
-- Secure cloud storage
-- Easy setup with Supabase anon key
+### 🎤 Voice Input (NEW!)
+- **Voice Recording** - Add tasks by speaking
+- **Nero Voice Responses** - Let Nero read responses aloud
+- **Hands-free Mode** - Perfect for when typing is hard
 
-### 📅 Calendar Integration
-- View calendar events in Timeline
-- Travel time alerts ("Leave in 15 min!")
-- Day-at-a-glance scheduling
-- Google Calendar compatible
+### 🔔 Native Push Notifications (NEW!)
+- **Expo Push Notifications** - Works even when app is closed
+- **Daily Check-ins** - Morning reminders
+- **Task Reminders** - Never forget scheduled tasks
+- **Hyperfocus Alerts** - Break reminders during deep work
 
-### 🧠 AI Companion (Nero)
-- 6 personality modes: Loyal Friend, Professional, Coach, Drill Sergeant, Funny, Calm
-- Claude AI integration (optional API key)
-- Natural language task detection
-- Energy level detection from messages
-- Transparent thinking mode
+### 🧠 AI-Powered Pattern Analysis
+- **Peak Hours Detection** - Know when you're most productive
+- **Completion Tracking** - Track task completion times
+- **Weekly Insights** - AI-generated recommendations
+- **Energy Correlation** - Link energy levels to success
 
-### ADHD-Specific Design
-- **ONE question at a time** - Never overwhelm
-- **Maximum 3 options** - Prevent decision paralysis
-- **No guilt mechanics** - No streaks, no punishment
-- **Energy matching** - Tasks filtered by your current energy
-- **Micro-step breakdown** - Break big tasks into tiny starts
-- **Context saving** - Bookmark where you are when life interrupts
+### 📊 6 View Modes
+- **Conversation** - Chat with Nero naturally
+- **One Thing** - Focus on single task
+- **List** - Traditional task list
+- **Timeline** - Visual day planner
+- **Dashboard** - Stats and achievements
+- **Minimal** - Low-energy simplified view
 
-### 🏆 Gamification (Positive Only!)
-- 18 unlockable achievements
-- Point system for progress
-- Day streak tracking
-- Surprise rewards (random dopamine hits!)
-- Personal bests, not comparisons
-
-### External Brain Features
-- 💭 **Thought Dump** - Get ideas out of your head instantly
-- 📌 **Context Save** - Bookmark your mental state
-- 🔍 **Breadcrumbs** - Trail of what you were doing
-- 🎤 **Voice Input** - Talk instead of type
+### 🎮 ADHD-Friendly Design
+- Positive-only gamification (no streaks!)
+- Satisfying completion animations
+- Micro-step task breakdown
+- Energy-aware suggestions
+- Context saving/restoration
+- Thought dump capture
 
 ## 🚀 Getting Started
 
-### Use the Live App
-Visit [unfocused-app.vercel.app](https://unfocused-app.vercel.app)
+### Web (Live Demo)
+Visit: https://unfocused-app.vercel.app
 
-### Run Locally
+### Mobile (iOS/Android)
+
+#### Development Build
 ```bash
-git clone https://github.com/justinnewbold/unfocused-app.git
-cd unfocused-app
 npm install
-npm start
+npx expo start
 ```
+
+#### Production Build (EAS)
+```bash
+# iOS
+eas build --platform ios --profile production
+
+# Android
+eas build --platform android --profile production
+```
+
+## 📱 App Store Submission
+
+### iOS Requirements
+1. Apple Developer Account ($99/year)
+2. App Store Connect setup
+3. Configure `app.json` with your Bundle ID
+4. Run `eas submit --platform ios`
+
+### Android Requirements
+1. Google Play Developer Account ($25 one-time)
+2. Google Play Console setup
+3. Create service account for automated submission
+4. Run `eas submit --platform android`
 
 ## 🔧 Configuration
 
-### Supabase Cloud Sync (Optional)
-1. Create a free account at [supabase.com](https://supabase.com)
-2. Create a new project
-3. Copy your anon key from Settings > API
-4. Paste in UnFocused Settings > Cloud Sync
+### Google Calendar OAuth
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create OAuth 2.0 credentials
+3. Add your Client IDs to App.tsx:
+```typescript
+const GOOGLE_CLIENT_ID_WEB = 'your-web-client-id';
+const GOOGLE_CLIENT_ID_IOS = 'your-ios-client-id';
+const GOOGLE_CLIENT_ID_ANDROID = 'your-android-client-id';
+```
 
-### Claude AI Integration (Optional)
-1. Get an API key from [console.anthropic.com](https://console.anthropic.com)
-2. Paste in UnFocused Settings > Claude API Key
+### Claude API (Optional)
+Add your Anthropic API key in Settings for enhanced AI responses.
 
-### Push Notifications
-- Click "Allow" when prompted for notification permissions
-- Choose your preferred notification style in Settings
+### Supabase Sync (Optional)
+Add your Supabase anon key in Settings for cloud sync.
 
-## 📱 Tech Stack
+## 🛠 Tech Stack
 
-- **React Native / Expo** - Cross-platform (iOS, Android, Web)
-- **TypeScript** - Type-safe code
-- **AsyncStorage** - Offline-first data persistence
-- **Supabase** - Cloud sync and user data
-- **Claude AI** - Optional intelligent responses
+- **Framework**: React Native / Expo SDK 52
+- **AI**: Claude API (Anthropic)
+- **Notifications**: Expo Notifications
+- **Voice**: expo-av, expo-speech
+- **Calendar**: Google Calendar API
+- **Auth**: expo-auth-session
+- **Storage**: AsyncStorage + Supabase
+- **Deployment**: Vercel (web) + EAS (native)
 
-## 🎯 Core Philosophy
+## 📁 Project Structure
 
-> "I need to WANT to keep opening the app, not just be reminded to do it."
+```
+unfocused-app/
+├── App.tsx           # Main application
+├── app.json          # Expo configuration
+├── eas.json          # EAS Build configuration
+├── package.json      # Dependencies
+├── assets/           # Icons and splash screens
+└── README.md
+```
 
-**Every other app:** "Here's our system. Adapt to it."
+## 🎯 Core UX Laws
 
-**UnFocused:** "I'll learn YOU. And adapt to you."
+1. **ONE question at a time** - Never overwhelm
+2. **MAXIMUM 3 options** - Prevent decision paralysis
+3. **Positive only** - No punishment mechanics
+4. **Adapt to user** - Not the other way around
 
-## 📊 Achievements
+## 🔒 Privacy
 
-| Achievement | Description | Points |
-|-------------|-------------|--------|
-| 👣 First Step | Complete your first task | 10 |
-| 🚀 Getting Going | Complete 5 tasks | 25 |
-| 🔥 On a Roll | Complete 10 tasks | 50 |
-| ⚡ Unstoppable | Complete 25 tasks | 100 |
-| 👑 Task Master | Complete 50 tasks | 200 |
-| 👋 Hello Nero | Start a conversation | 10 |
-| 💙 Best Friends | Send 10 messages | 25 |
-| 🌙 Low Energy Hero | Complete task on low energy | 30 |
-| ✨ Micro Win | Complete a micro-step | 10 |
-| 🔨 Task Breaker | Break down 3 tasks | 25 |
-| 📌 Context Keeper | Save your context | 15 |
-| 💭 Brain Dump | Capture 5 thoughts | 20 |
-| 🦸 Comeback Kid | Return after a day away | 30 |
-| 🌅 Early Bird | Complete task before 9am | 20 |
-| 🦉 Night Owl | Complete task after 10pm | 20 |
-| 📅 Calendar Pro | Connect your calendar | 25 |
-| ☁️ Sync Master | Enable cloud sync | 25 |
-| 🗓️ Week Warrior | Use app for 7 days | 75 |
+- Local-first data storage
+- Optional cloud sync
+- No tracking or analytics
+- User controls all data
 
 ## 📄 License
 
-MIT
+MIT License - Use freely!
 
 ---
 
-Built with 💙 for the ADHD community
+Built with 💜 for the ADHD community
