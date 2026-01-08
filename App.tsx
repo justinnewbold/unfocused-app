@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, 
-  SafeAreaView, Modal, Animated, Platform, KeyboardAvoidingView, 
+import {
+  StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView,
+  SafeAreaView, Modal, Animated, Platform, KeyboardAvoidingView,
   ActivityIndicator, Switch, Linking, Alert, AppState
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -12,6 +12,19 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
+
+// ============ NEW AI FEATURE IMPORTS ============
+import { FocusTimerService } from './src/services/FocusTimerService';
+import { MoodTrackingService } from './src/services/MoodTrackingService';
+import { ProactiveCheckInService } from './src/services/ProactiveCheckInService';
+import { SmartNotificationService } from './src/services/SmartNotificationService';
+import { ContextAwareSuggestionService } from './src/services/ContextAwareSuggestionService';
+import { WidgetService, parseWidgetDeepLink } from './src/widgets/WidgetService';
+import { FocusTimer } from './src/components/FocusTimer';
+import { MoodTracker } from './src/components/MoodTracker';
+import { TaskSuggestions } from './src/components/TaskSuggestions';
+import { ProactiveCheckInCard } from './src/components/ProactiveCheckInCard';
+import type { MoodLevel, FocusSession, ProactiveCheckIn, MoodEntry } from './src/types';
 
 // Complete OAuth flow on web
 WebBrowser.maybeCompleteAuthSession();
@@ -1398,6 +1411,33 @@ export default function App() {
   const [nativeNotificationService] = useState(() => new NativeNotificationService());
   const [voiceService] = useState(() => new VoiceService());
 
+  // ============ NEW AI SERVICES ============
+  const [focusTimerService] = useState(() => new FocusTimerService());
+  const [moodTrackingService] = useState(() => new MoodTrackingService());
+  const [proactiveCheckInService] = useState(() => new ProactiveCheckInService());
+  const [smartNotificationService] = useState(() => new SmartNotificationService());
+  const [contextSuggestionService] = useState(() => new ContextAwareSuggestionService());
+  const [widgetService] = useState(() => new WidgetService());
+
+  // ============ NEW AI FEATURE STATE ============
+  // Focus Timer State
+  const [showFocusTimer, setShowFocusTimer] = useState(false);
+  const [focusTimerRemaining, setFocusTimerRemaining] = useState(0);
+  const [focusSessionHistory, setFocusSessionHistory] = useState<FocusSession[]>([]);
+
+  // Mood Tracking State
+  const [currentMood, setCurrentMood] = useState<MoodLevel | null>(null);
+  const [moodHistory, setMoodHistory] = useState<MoodEntry[]>([]);
+  const [showMoodTracker, setShowMoodTracker] = useState(false);
+
+  // Proactive Check-In State
+  const [activeCheckIn, setActiveCheckIn] = useState<ProactiveCheckIn | null>(null);
+  const [checkInHistory, setCheckInHistory] = useState<ProactiveCheckIn[]>([]);
+
+  // Context-Aware Suggestions State
+  const [taskSuggestions, setTaskSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(true);
+
   // Pattern Analysis State
   const [completionHistory, setCompletionHistory] = useState<CompletionRecord[]>([]);
   const [weeklyInsights, setWeeklyInsights] = useState<WeeklyInsight[]>([]);
@@ -1478,6 +1518,183 @@ export default function App() {
     } catch (e) {
       console.log('No saved Google tokens');
     }
+
+    // Load AI feature data
+    await initializeAIFeatures();
+  };
+
+  // ============ NEW: Initialize AI Features ============
+  const initializeAIFeatures = async () => {
+    try {
+      // Load mood history
+      const savedMoodHistory = await AsyncStorage.getItem('@uf/mood_history');
+      if (savedMoodHistory) {
+        const history = JSON.parse(savedMoodHistory);
+        setMoodHistory(history);
+        moodTrackingService.setMoodHistory(history);
+      }
+
+      // Load focus session history
+      const savedFocusSessions = await AsyncStorage.getItem('@uf/focus_sessions');
+      if (savedFocusSessions) {
+        const sessions = JSON.parse(savedFocusSessions);
+        setFocusSessionHistory(sessions);
+        focusTimerService.setSessionHistory(sessions);
+      }
+
+      // Load check-in history
+      const savedCheckIns = await AsyncStorage.getItem('@uf/checkin_history');
+      if (savedCheckIns) {
+        const history = JSON.parse(savedCheckIns);
+        setCheckInHistory(history);
+        proactiveCheckInService.setCheckInHistory(history);
+      }
+
+      // Load widget data
+      await widgetService.loadWidgetData();
+    } catch (e) {
+      console.log('Failed to load AI feature data:', e);
+    }
+  };
+
+  // ============ NEW: AI Feature Effects ============
+
+  // Save mood history when it changes
+  useEffect(() => {
+    if (moodHistory.length > 0) {
+      AsyncStorage.setItem('@uf/mood_history', JSON.stringify(moodHistory.slice(-100)));
+    }
+  }, [moodHistory]);
+
+  // Save focus sessions when they change
+  useEffect(() => {
+    if (focusSessionHistory.length > 0) {
+      AsyncStorage.setItem('@uf/focus_sessions', JSON.stringify(focusSessionHistory.slice(-50)));
+    }
+  }, [focusSessionHistory]);
+
+  // Save check-in history
+  useEffect(() => {
+    if (checkInHistory.length > 0) {
+      AsyncStorage.setItem('@uf/checkin_history', JSON.stringify(checkInHistory.slice(-50)));
+    }
+  }, [checkInHistory]);
+
+  // Update widget data when tasks/energy change
+  useEffect(() => {
+    widgetService.updateTasks(tasks);
+  }, [tasks]);
+
+  useEffect(() => {
+    widgetService.updateEnergy(energy);
+  }, [energy]);
+
+  useEffect(() => {
+    widgetService.updateMood(currentMood);
+  }, [currentMood]);
+
+  useEffect(() => {
+    widgetService.updateStats(stats.streak, stats.totalPoints);
+  }, [stats.streak, stats.totalPoints]);
+
+  // Sync services with completion history
+  useEffect(() => {
+    if (completionHistory.length > 0) {
+      proactiveCheckInService.setCompletionHistory(completionHistory);
+      smartNotificationService.setCompletionHistory(completionHistory);
+      contextSuggestionService.setCompletionHistory(completionHistory);
+      moodTrackingService.setCompletionHistory(completionHistory);
+      proactiveCheckInService.setHourlyStats(patternService.getHourlyStats());
+    }
+  }, [completionHistory]);
+
+  // Sync calendar events with suggestion service
+  useEffect(() => {
+    contextSuggestionService.setCalendarEvents(calendarEvents);
+  }, [calendarEvents]);
+
+  // Check for proactive check-ins periodically
+  useEffect(() => {
+    const checkInterval = setInterval(() => {
+      if (profile.proactiveCheckinsEnabled !== false) {
+        const checkIn = proactiveCheckInService.shouldCheckIn(energy, currentMood, profile);
+        if (checkIn && !activeCheckIn) {
+          setActiveCheckIn(checkIn);
+          setCheckInHistory(prev => [...prev, checkIn]);
+        }
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+
+    return () => clearInterval(checkInterval);
+  }, [energy, currentMood, profile, activeCheckIn]);
+
+  // Update task suggestions when context changes
+  useEffect(() => {
+    if (showSuggestions && tasks.filter(t => !t.completed).length > 0) {
+      const suggestions = contextSuggestionService.getSuggestions(tasks, energy, currentMood);
+      setTaskSuggestions(suggestions);
+    }
+  }, [tasks, energy, currentMood, showSuggestions]);
+
+  // ============ NEW: AI Feature Handlers ============
+
+  const handleMoodRecorded = (mood: MoodLevel) => {
+    setCurrentMood(mood);
+    const entry = moodTrackingService.recordMood(mood, energy || undefined, undefined, 'checkin');
+    setMoodHistory(prev => [...prev, entry]);
+
+    // Update smart notification service with mood
+    smartNotificationService.setEnabled(profile.smartNotificationsEnabled !== false);
+
+    // Record activity for check-in service
+    proactiveCheckInService.recordActivity();
+    contextSuggestionService.recordActivity();
+  };
+
+  const handleFocusSessionComplete = (session: FocusSession) => {
+    setFocusSessionHistory(prev => [...prev, session]);
+
+    // Celebrate completion
+    if (session.completedPomodoros > 0) {
+      setCelebText(`🎯 Focus session complete! ${session.completedPomodoros} pomodoro${session.completedPomodoros > 1 ? 's' : ''} done!`);
+      setShowCeleb(true);
+      Animated.sequence([
+        Animated.timing(celebAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        Animated.delay(2000),
+        Animated.timing(celebAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+      ]).start(() => setShowCeleb(false));
+    }
+
+    // Update widget
+    widgetService.updateFocusSession(false);
+  };
+
+  const handleCheckInResponse = (response: string) => {
+    if (activeCheckIn) {
+      proactiveCheckInService.respondToCheckIn(activeCheckIn.id, response);
+      setActiveCheckIn(null);
+
+      // Handle specific responses
+      if (response === 'ready' || response === 'back') {
+        // User is ready to work
+        const suggestions = contextSuggestionService.getSuggestions(tasks, energy, currentMood);
+        if (suggestions.length > 0) {
+          setTaskSuggestions(suggestions);
+          setShowSuggestions(true);
+        }
+      } else if (response === 'tiny_task' || response === 'easy_tasks') {
+        // Show low-energy tasks
+        setFilter('low');
+        setView('list');
+      } else if (response === 'talk') {
+        // Open conversation view
+        setView('conversation');
+      }
+    }
+  };
+
+  const handleCheckInDismiss = () => {
+    setActiveCheckIn(null);
   };
 
   // Handle Google OAuth response
@@ -2634,6 +2851,19 @@ export default function App() {
             )}
           </View>
           <View style={S.headR}>
+            {/* Focus Timer Button */}
+            <TouchableOpacity
+              style={[S.headBtn, focusTimerService.getCurrentSession() && { backgroundColor: C.primary }]}
+              onPress={() => setShowFocusTimer(true)}
+            >
+              <Text>{focusTimerService.getCurrentSession() ? '⏱️' : '🎯'}</Text>
+            </TouchableOpacity>
+            {/* Mood Badge */}
+            {currentMood && (
+              <TouchableOpacity style={S.headBtn} onPress={() => setCurrentMood(null)}>
+                <Text>{currentMood === 'low' ? '😔' : currentMood === 'neutral' ? '😐' : '😊'}</Text>
+              </TouchableOpacity>
+            )}
             {supabaseKey && (
               <TouchableOpacity style={S.headBtn} onPress={syncToCloud}>
                 <Text>{syncing ? '⏳' : '☁️'}</Text>
@@ -2652,6 +2882,35 @@ export default function App() {
         {travelAlert && (
           <View style={S.travelAlert}>
             <Text style={S.travelAlertT}>🚗 {travelAlert}</Text>
+          </View>
+        )}
+
+        {/* PROACTIVE CHECK-IN */}
+        {activeCheckIn && (
+          <ProactiveCheckInCard
+            checkIn={activeCheckIn}
+            onRespond={handleCheckInResponse}
+            onDismiss={handleCheckInDismiss}
+          />
+        )}
+
+        {/* MOOD TRACKER - Show after energy is set */}
+        {energy && !currentMood && view !== 'minimal' && (
+          <View style={S.moodPrompt}>
+            <Text style={S.moodPromptT}>How are you feeling?</Text>
+            <View style={S.moodBtns}>
+              {(['low', 'neutral', 'high'] as MoodLevel[]).map((mood) => (
+                <TouchableOpacity
+                  key={mood}
+                  style={S.moodBtn}
+                  onPress={() => handleMoodRecorded(mood)}
+                >
+                  <Text style={S.moodBtnE}>
+                    {mood === 'low' ? '😔' : mood === 'neutral' ? '😐' : '😊'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
         )}
 
@@ -3255,6 +3514,66 @@ export default function App() {
           </View>
         </Modal>
 
+        {/* Focus Timer Modal */}
+        <Modal visible={showFocusTimer} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={[S.mC, { maxHeight: '90%' }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={S.mT}>⏱️ Focus Timer</Text>
+                <TouchableOpacity onPress={() => setShowFocusTimer(false)}>
+                  <Text style={{ fontSize: 24, color: C.textMuted }}>×</Text>
+                </TouchableOpacity>
+              </View>
+              <FocusTimer
+                service={focusTimerService}
+                currentTaskId={nextTask?.id}
+                currentTaskTitle={nextTask?.title}
+                energy={energy}
+                mood={currentMood}
+                onSessionComplete={handleFocusSessionComplete}
+                onBreakStart={() => {
+                  // Optional: notification for break
+                  nativeNotificationService.scheduleNotification(
+                    '☕ Break Time!',
+                    'Great work! Take a well-deserved break.',
+                    { seconds: 1 }
+                  );
+                }}
+              />
+            </View>
+          </View>
+        </Modal>
+
+        {/* Task Suggestions Modal */}
+        {showSuggestions && taskSuggestions.length > 0 && view === 'oneThing' && (
+          <View style={S.suggestionsOverlay}>
+            <TaskSuggestions
+              service={contextSuggestionService}
+              tasks={tasks}
+              energy={energy}
+              mood={currentMood}
+              onSelectTask={(taskId) => {
+                const task = tasks.find(t => t.id === taskId);
+                if (task) {
+                  // Move selected task to top
+                  setTasks(prev => [task, ...prev.filter(t => t.id !== taskId)]);
+                }
+                setShowSuggestions(false);
+              }}
+              onCompleteTask={(taskId) => {
+                completeTask(taskId);
+                setShowSuggestions(false);
+              }}
+            />
+            <TouchableOpacity
+              style={S.dismissSuggestions}
+              onPress={() => setShowSuggestions(false)}
+            >
+              <Text style={S.dismissSuggestionsT}>Dismiss suggestions</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Celebration Overlay */}
         {showCeleb && (
           <Animated.View style={[S.celebO, { opacity: celebAnim, transform: [{ scale: celebAnim }] }]}>
@@ -3537,4 +3856,20 @@ const S = StyleSheet.create({
   chartBarWrapper: { alignItems: 'center', width: 16 },
   chartBar: { width: 10, borderRadius: 5, backgroundColor: C.primary, minHeight: 4 },
   chartLabel: { color: C.textMuted, fontSize: 8, marginTop: 4 },
+
+  // Task Suggestions Overlay
+  suggestionsOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: C.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, paddingBottom: 24, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10 },
+  dismissSuggestions: { alignItems: 'center', paddingVertical: 12, marginHorizontal: 16 },
+  dismissSuggestionsT: { color: C.textMuted, fontSize: 14 },
+
+  // Mood Prompt
+  moodPrompt: { backgroundColor: C.card, marginHorizontal: 16, marginBottom: 16, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.border },
+  moodPromptT: { color: C.text, fontSize: 14, marginBottom: 12, textAlign: 'center' },
+  moodBtns: { flexDirection: 'row', justifyContent: 'space-around' },
+  moodBtn: { padding: 12, borderRadius: 12, backgroundColor: C.surface, minWidth: 60, alignItems: 'center' },
+  moodBtnE: { fontSize: 24 },
+
+  // Focus Timer Button
+  focusTimerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: C.primary, marginHorizontal: 16, marginBottom: 16, paddingVertical: 14, borderRadius: 16, shadowColor: C.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  focusTimerBtnT: { color: C.text, fontSize: 16, fontWeight: '700', marginLeft: 8 },
 });
