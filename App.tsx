@@ -2367,23 +2367,6 @@ export default function App() {
     }
   };
 
-  // ============ VOICE INPUT ============
-
-  const startVoiceInput = () => {
-    setListening(true);
-    // Simulated for web - in native app would use expo-speech
-    setTimeout(() => {
-      const samples = [
-        "I need to finish that report today",
-        "Remind me to call mom",
-        "I'm feeling pretty tired today",
-        "What should I focus on?",
-      ];
-      setInput(samples[Math.floor(Math.random() * samples.length)]);
-      setListening(false);
-    }, 2000);
-  };
-
   // ============ ONBOARDING ============
 
   const finishOnboarding = async () => {
