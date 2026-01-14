@@ -26,6 +26,16 @@ import { TaskSuggestions } from './src/components/TaskSuggestions';
 import { ProactiveCheckInCard } from './src/components/ProactiveCheckInCard';
 import type { MoodLevel, FocusSession, ProactiveCheckIn, MoodEntry } from './src/types';
 
+// ============ SUPABASE AUTH IMPORTS ============
+import { useAuth } from './src/hooks/useAuth';
+import { useSupabaseSync } from './src/hooks/useSupabaseSync';
+import { AuthScreen } from './src/components/AuthScreen';
+import { WeeklyReportCard } from './src/components/WeeklyReportCard';
+import { SmartNudgeSetup } from './src/components/SmartNudgeSetup';
+import { WeeklyReportService, type WeeklyReportData } from './src/services/WeeklyReportService';
+import { supabase, FocusSessionsAPI, EnergyLogsAPI, TasksAPI } from './src/services/supabase';
+
+
 // Complete OAuth flow on web
 WebBrowser.maybeCompleteAuthSession();
 
@@ -1344,7 +1354,15 @@ const extractTasks = (text: string): string[] => {
 // ============ MAIN APP COMPONENT ============
 export default function App() {
   // Core State
-  const [screen, setScreen] = useState<'welcome' | 'onboarding' | 'main' | 'settings'>('welcome');
+  const [screen, setScreen] = useState<'auth' | 'welcome' | 'onboarding' | 'main' | 'settings'>('auth');
+  
+  // ============ SUPABASE AUTH STATE ============
+  const { user, session, loading: authLoading, error: authError, signIn, signUp, signOut, clearError } = useAuth();
+  const supabaseSync = useSupabaseSync({ userId: user?.id || null });
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReportData | null>(null);
+  const [showWeeklyReport, setShowWeeklyReport] = useState(false);
+  const [showNudgeSetup, setShowNudgeSetup] = useState(false);
+
   const [view, setView] = useState<ViewMode>('conversation');
   const [loading, setLoading] = useState(true);
 
@@ -1490,6 +1508,51 @@ export default function App() {
   const scrollRef = useRef<ScrollView>(null);
 
   // ============ EFFECTS ============
+
+  // ============ AUTH STATE EFFECT ============
+  useEffect(() => {
+    if (!authLoading) {
+      if (user) {
+        // User authenticated - check onboarding status
+        AsyncStorage.getItem('@uf/onb').then(onb => {
+          if (screen === 'auth') {
+            setScreen(onb === 'true' ? 'main' : 'welcome');
+          }
+        });
+        // Load tasks from Supabase
+        supabaseSync.loadTasks().then(cloudTasks => {
+          if (cloudTasks.length > 0) {
+            setTasks(prev => {
+              // Merge local unsynced tasks with cloud tasks
+              const unsynced = prev.filter(t => !t.synced);
+              return [...cloudTasks, ...unsynced];
+            });
+          }
+        });
+        // Check for weekly report (Monday mornings)
+        const reportService = new WeeklyReportService(user.id);
+        if (reportService.shouldShowWeeklyReport()) {
+          reportService.generateWeeklyReport().then(report => {
+            setWeeklyReport(report);
+            setShowWeeklyReport(true);
+          }).catch(err => console.log('Report generation error:', err));
+        }
+      } else if (screen !== 'auth') {
+        // User logged out
+        setScreen('auth');
+      }
+    }
+  }, [authLoading, user]);
+
+
+
+  // Log energy changes to Supabase
+  useEffect(() => {
+    if (energy && user) {
+      supabaseSync.logEnergy(energy, currentMood || undefined, undefined)
+        .catch(err => console.log('Energy log error:', err));
+    }
+  }, [energy, user]);
 
   // Load data on mount
   useEffect(() => {
@@ -1667,6 +1730,16 @@ export default function App() {
 
     // Update widget
     widgetService.updateFocusSession(false);
+
+    // Sync focus session to Supabase
+    if (user && session.startTime && session.endTime) {
+      supabaseSync.logFocusSession(
+        new Date(session.startTime),
+        new Date(session.endTime),
+        session.taskId,
+        `${session.completedPomodoros} pomodoros completed`
+      ).catch(err => console.log('Focus session sync error:', err));
+    }
   };
 
   const handleCheckInResponse = (response: string) => {
@@ -1971,6 +2044,15 @@ export default function App() {
       notificationService.scheduleVariableReminder(taskTitle);
     }
 
+    // Sync to Supabase
+    if (user) {
+      supabaseSync.createTask(task).then(syncedTask => {
+        if (syncedTask) {
+          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, id: syncedTask.id, synced: true } : t));
+        }
+      }).catch(err => console.log('Task sync error:', err));
+    }
+
     return task;
   };
 
@@ -2141,7 +2223,12 @@ export default function App() {
     const completionTimeMs = task.createdAt ? Date.now() - new Date(task.createdAt).getTime() : undefined;
 
     // Update task as completed
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt, completionTimeMs } : t));
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt, completionTimeMs, synced: true } : t));
+    
+    // Sync completion to Supabase
+    if (user) {
+      supabaseSync.completeTask(id).catch(err => console.log('Sync error:', err));
+    }
 
     // Record completion for pattern analysis
     const completedTask = { ...task, completedAt, completionTimeMs };
@@ -2393,6 +2480,35 @@ export default function App() {
         <ActivityIndicator size="large" color={C.primary} />
         <Text style={S.loadText}>Loading UnFocused...</Text>
       </View>
+    );
+  }
+
+  
+  // AUTH LOADING
+  if (authLoading) {
+    return (
+      <View style={[S.container, S.center]}>
+        <ActivityIndicator size="large" color={C.primary} />
+        <Text style={S.loadText}>Checking authentication...</Text>
+      </View>
+    );
+  }
+
+  // AUTH SCREEN
+  if (screen === 'auth') {
+    return (
+      <AuthScreen
+        onSignIn={signIn}
+        onSignUp={signUp}
+        onSkip={() => {
+          AsyncStorage.getItem('@uf/onb').then(onb => {
+            setScreen(onb === 'true' ? 'main' : 'welcome');
+          });
+        }}
+        loading={authLoading}
+        error={authError}
+        clearError={clearError}
+      />
     );
   }
 
@@ -2731,25 +2847,49 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          {/* Cloud Sync */}
+          {/* Account & Sync */}
           <View style={S.setSec}>
-            <Text style={S.setSecT}>☁️ Cloud Sync (Supabase)</Text>
-            <Text style={[S.setOptD, { marginBottom: 8 }]}>Sync your data across devices</Text>
-            <TextInput
-              style={S.setIn}
-              value={supabaseKey}
-              onChangeText={setSupabaseKey}
-              placeholder="Supabase anon key"
-              placeholderTextColor={C.textMuted}
-              secureTextEntry
-            />
-            {supabaseKey && (
-              <TouchableOpacity style={[S.syncBtn, syncing && { opacity: 0.5 }]} onPress={syncToCloud} disabled={syncing}>
-                <Text style={S.syncBtnT}>{syncing ? 'Syncing...' : '☁️ Sync Now'}</Text>
+            <Text style={S.setSecT}>👤 Account</Text>
+            {user ? (
+              <>
+                <View style={[S.setOpt, S.setOptSel]}>
+                  <Text style={S.setOptE}>✓</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.setOptT}>Signed In</Text>
+                    <Text style={S.setOptD}>{user.email}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity 
+                  style={[S.setOpt, { marginTop: 8, backgroundColor: C.primary + '20' }]}
+                  onPress={() => setShowNudgeSetup(true)}
+                >
+                  <Text style={S.setOptE}>⏰</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.setOptT}>Smart Nudge Setup</Text>
+                    <Text style={S.setOptD}>Configure personalized notification timing</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[S.dangerBtn, { marginTop: 12 }]}
+                  onPress={() => {
+                    signOut();
+                    setScreen('auth');
+                  }}
+                >
+                  <Text style={S.dangerBtnT}>Sign Out</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity 
+                style={S.setOpt}
+                onPress={() => setScreen('auth')}
+              >
+                <Text style={S.setOptE}>🔐</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.setOptT}>Sign In</Text>
+                  <Text style={S.setOptD}>Sync data across devices</Text>
+                </View>
               </TouchableOpacity>
-            )}
-            {profile.lastSync && (
-              <Text style={S.lastSync}>Last sync: {formatDate(new Date(profile.lastSync))}</Text>
             )}
           </View>
 
@@ -3557,6 +3697,43 @@ export default function App() {
           </View>
         )}
 
+
+        {/* Weekly Report Modal */}
+        <Modal visible={showWeeklyReport} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={[S.mC, { maxHeight: '90%' }]}>
+              {weeklyReport && (
+                <WeeklyReportCard
+                  report={weeklyReport}
+                  onDismiss={() => setShowWeeklyReport(false)}
+                  onViewDetails={() => {
+                    setShowWeeklyReport(false);
+                    setView('dashboard');
+                  }}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        {/* Smart Nudge Setup Modal */}
+        <Modal visible={showNudgeSetup} transparent animationType="slide">
+          <View style={S.mO}>
+            <View style={[S.mC, { maxHeight: '90%' }]}>
+              {user && (
+                <SmartNudgeSetup
+                  userId={user.id}
+                  onClose={() => setShowNudgeSetup(false)}
+                  onNudgesUpdated={() => {
+                    // Refresh nudges or show confirmation
+                    console.log('Nudges updated');
+                  }}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+
         {/* Celebration Overlay */}
         {showCeleb && (
           <Animated.View style={[S.celebO, { opacity: celebAnim, transform: [{ scale: celebAnim }] }]}>
@@ -3856,3 +4033,4 @@ const S = StyleSheet.create({
   focusTimerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: C.primary, marginHorizontal: 16, marginBottom: 16, paddingVertical: 14, borderRadius: 16, shadowColor: C.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   focusTimerBtnT: { color: C.text, fontSize: 16, fontWeight: '700', marginLeft: 8 },
 });
+
