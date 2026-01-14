@@ -1,318 +1,289 @@
+// Authentication Screen for UnFocused
+// Clean, ADHD-friendly login/signup interface
+
 import React, { useState } from 'react';
-import { supabase } from '../services/supabase';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  Animated,
+} from 'react-native';
 
 interface AuthScreenProps {
-  onAuthSuccess: (userId: string) => void;
+  onSignIn: (email: string, password: string) => Promise<boolean>;
+  onSignUp: (email: string, password: string) => Promise<boolean>;
+  onSkip: () => void;
+  loading: boolean;
+  error: string | null;
+  clearError: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
-  const [isLogin, setIsLogin] = useState(true);
+export function AuthScreen({ 
+  onSignIn, 
+  onSignUp, 
+  onSkip, 
+  loading, 
+  error, 
+  clearError 
+}: AuthScreenProps) {
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setMessage(null);
+  const handleSubmit = async () => {
+    setLocalError(null);
+    clearError();
 
-    try {
-      if (isLogin) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        
-        if (error) throw error;
-        if (data.user) {
-          onAuthSuccess(data.user.id);
-        }
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        
-        if (error) throw error;
-        
-        if (data.user && !data.session) {
-          setMessage('Check your email for the confirmation link!');
-        } else if (data.user) {
-          onAuthSuccess(data.user.id);
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
-    } finally {
-      setLoading(false);
+    // Validation
+    if (!email.trim()) {
+      setLocalError('Please enter your email');
+      return;
+    }
+    if (!password) {
+      setLocalError('Please enter a password');
+      return;
+    }
+    if (password.length < 6) {
+      setLocalError('Password must be at least 6 characters');
+      return;
+    }
+    if (mode === 'signup' && password !== confirmPassword) {
+      setLocalError('Passwords don\'t match');
+      return;
+    }
+
+    if (mode === 'signin') {
+      await onSignIn(email.trim(), password);
+    } else {
+      await onSignUp(email.trim(), password);
     }
   };
 
-  const handleGuestMode = () => {
-    // Generate a temporary guest ID for demo purposes
-    const guestId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    onAuthSuccess(guestId);
+  const switchMode = () => {
+    setMode(mode === 'signin' ? 'signup' : 'signin');
+    setLocalError(null);
+    clearError();
+    setPassword('');
+    setConfirmPassword('');
   };
 
+  const displayError = localError || error;
+
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        {/* Nero Avatar */}
-        <div style={styles.avatarContainer}>
-          <div style={styles.avatar}>
-            <span style={styles.avatarEmoji}>🧠</span>
-          </div>
-          <h1 style={styles.title}>UnFocused</h1>
-          <p style={styles.subtitle}>Your AI Companion for the ADHD Brain</p>
-        </div>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+      >
+        <View style={styles.content}>
+          {/* Logo & Title */}
+          <View style={styles.header}>
+            <Text style={styles.logo}>🧠</Text>
+            <Text style={styles.title}>UnFocused</Text>
+            <Text style={styles.subtitle}>
+              {mode === 'signin' 
+                ? 'Welcome back! Let\'s get you focused.' 
+                : 'Create your account to sync across devices'}
+            </Text>
+          </View>
 
-        {/* Welcome Message from Nero */}
-        <div style={styles.neroMessage}>
-          <p style={styles.neroText}>
-            Hey there! I'm Nero, your new focus companion. 
-            {isLogin 
-              ? " Welcome back! Let's pick up where we left off." 
-              : " I'm excited to learn about you and help you work with your brain, not against it."}
-          </p>
-        </div>
-
-        {/* Auth Form */}
-        <form onSubmit={handleAuth} style={styles.form}>
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
+          {/* Form */}
+          <View style={styles.form}>
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor="#888"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              style={styles.input}
-              required
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              editable={!loading}
             />
-          </div>
-
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Password</label>
-            <input
-              type="password"
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor="#888"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              style={styles.input}
-              required
-              minLength={6}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              editable={!loading}
             />
-          </div>
 
-          {error && <div style={styles.error}>{error}</div>}
-          {message && <div style={styles.success}>{message}</div>}
+            {mode === 'signup' && (
+              <TextInput
+                style={styles.input}
+                placeholder="Confirm Password"
+                placeholderTextColor="#888"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                editable={!loading}
+              />
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              ...styles.button,
-              ...(loading ? styles.buttonDisabled : {}),
-            }}
-          >
-            {loading ? 'Working on it...' : isLogin ? "Let's Go!" : 'Create Account'}
-          </button>
-        </form>
+            {displayError && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>⚠️ {displayError}</Text>
+              </View>
+            )}
 
-        {/* Toggle Login/Signup */}
-        <button
-          onClick={() => {
-            setIsLogin(!isLogin);
-            setError(null);
-            setMessage(null);
-          }}
-          style={styles.toggleButton}
-        >
-          {isLogin ? "New here? Create an account" : "Already have an account? Sign in"}
-        </button>
+            <TouchableOpacity 
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>
+                  {mode === 'signin' ? 'Sign In' : 'Create Account'}
+                </Text>
+              )}
+            </TouchableOpacity>
 
-        {/* Divider */}
-        <div style={styles.divider}>
-          <span style={styles.dividerText}>or</span>
-        </div>
+            <TouchableOpacity 
+              style={styles.switchButton}
+              onPress={switchMode}
+              disabled={loading}
+            >
+              <Text style={styles.switchText}>
+                {mode === 'signin' 
+                  ? 'Don\'t have an account? Sign up' 
+                  : 'Already have an account? Sign in'}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Guest Mode */}
-        <button onClick={handleGuestMode} style={styles.guestButton}>
-          🎯 Try as Guest (no account needed)
-        </button>
-
-        <p style={styles.guestNote}>
-          Guest mode is great for trying things out, but your data won't sync across devices.
-        </p>
-      </div>
-    </div>
+          {/* Skip Option */}
+          <View style={styles.footer}>
+            <TouchableOpacity 
+              style={styles.skipButton}
+              onPress={onSkip}
+              disabled={loading}
+            >
+              <Text style={styles.skipText}>
+                Skip for now (data stays local)
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.skipNote}>
+              You can sign in later to sync across devices
+            </Text>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
-};
+}
 
-const styles: { [key: string]: React.CSSProperties } = {
+const styles = StyleSheet.create({
   container: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    padding: 24,
     justifyContent: 'center',
-    background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-    padding: '20px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   },
-  card: {
-    background: 'rgba(255, 255, 255, 0.05)',
-    backdropFilter: 'blur(20px)',
-    borderRadius: '24px',
-    padding: '40px',
-    maxWidth: '420px',
-    width: '100%',
-    border: '1px solid rgba(255, 255, 255, 0.1)',
-    boxShadow: '0 25px 50px rgba(0, 0, 0, 0.3)',
-  },
-  avatarContainer: {
-    textAlign: 'center' as const,
-    marginBottom: '24px',
-  },
-  avatar: {
-    width: '80px',
-    height: '80px',
-    borderRadius: '50%',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    display: 'flex',
+  header: {
     alignItems: 'center',
-    justifyContent: 'center',
-    margin: '0 auto 16px',
-    boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
+    marginBottom: 40,
   },
-  avatarEmoji: {
-    fontSize: '40px',
+  logo: {
+    fontSize: 64,
+    marginBottom: 16,
   },
   title: {
-    fontSize: '32px',
-    fontWeight: 700,
-    color: '#ffffff',
-    margin: '0 0 8px 0',
-    letterSpacing: '-0.5px',
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: '14px',
-    color: 'rgba(255, 255, 255, 0.6)',
-    margin: 0,
-  },
-  neroMessage: {
-    background: 'rgba(102, 126, 234, 0.15)',
-    borderRadius: '16px',
-    padding: '16px',
-    marginBottom: '24px',
-    borderLeft: '3px solid #667eea',
-  },
-  neroText: {
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: '14px',
-    lineHeight: 1.6,
-    margin: 0,
+    fontSize: 16,
+    color: '#888',
+    textAlign: 'center',
+    maxWidth: 280,
   },
   form: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '16px',
-  },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '6px',
-  },
-  label: {
-    fontSize: '13px',
-    fontWeight: 500,
-    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: 24,
   },
   input: {
-    padding: '14px 16px',
-    borderRadius: '12px',
-    border: '1px solid rgba(255, 255, 255, 0.15)',
-    background: 'rgba(255, 255, 255, 0.08)',
-    color: '#ffffff',
-    fontSize: '16px',
-    outline: 'none',
-    transition: 'all 0.2s ease',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 14,
+    textAlign: 'center',
   },
   button: {
-    padding: '16px',
-    borderRadius: '12px',
-    border: 'none',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    color: '#ffffff',
-    fontSize: '16px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    marginTop: '8px',
-    transition: 'all 0.2s ease',
-    boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+    backgroundColor: '#6366f1',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 8,
   },
   buttonDisabled: {
-    opacity: 0.6,
-    cursor: 'not-allowed',
+    opacity: 0.7,
   },
-  toggleButton: {
-    background: 'transparent',
-    border: 'none',
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: '14px',
-    cursor: 'pointer',
-    marginTop: '16px',
-    padding: '8px',
-    width: '100%',
-    transition: 'color 0.2s ease',
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
-  divider: {
-    display: 'flex',
+  switchButton: {
+    padding: 16,
     alignItems: 'center',
-    margin: '20px 0',
   },
-  dividerText: {
-    flex: 1,
-    textAlign: 'center' as const,
-    color: 'rgba(255, 255, 255, 0.4)',
-    fontSize: '13px',
-    position: 'relative' as const,
+  switchText: {
+    color: '#6366f1',
+    fontSize: 14,
   },
-  guestButton: {
-    padding: '14px',
-    borderRadius: '12px',
-    border: '1px solid rgba(255, 255, 255, 0.2)',
-    background: 'transparent',
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: '15px',
-    cursor: 'pointer',
-    width: '100%',
-    transition: 'all 0.2s ease',
+  footer: {
+    alignItems: 'center',
+    marginTop: 20,
   },
-  guestNote: {
-    fontSize: '12px',
-    color: 'rgba(255, 255, 255, 0.4)',
-    textAlign: 'center' as const,
-    marginTop: '12px',
-    lineHeight: 1.4,
+  skipButton: {
+    padding: 12,
   },
-  error: {
-    background: 'rgba(239, 68, 68, 0.15)',
-    border: '1px solid rgba(239, 68, 68, 0.3)',
-    color: '#fca5a5',
-    padding: '12px',
-    borderRadius: '8px',
-    fontSize: '14px',
+  skipText: {
+    color: '#666',
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
-  success: {
-    background: 'rgba(34, 197, 94, 0.15)',
-    border: '1px solid rgba(34, 197, 94, 0.3)',
-    color: '#86efac',
-    padding: '12px',
-    borderRadius: '8px',
-    fontSize: '14px',
+  skipNote: {
+    color: '#444',
+    fontSize: 12,
+    marginTop: 4,
   },
-};
+});
 
 export default AuthScreen;
