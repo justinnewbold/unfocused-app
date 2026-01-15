@@ -1,7 +1,7 @@
 // ============ TYPES ============
 export type EnergyLevel = 'low' | 'medium' | 'high';
-export type ViewMode = 'conversation' | 'oneThing' | 'list' | 'timeline' | 'dashboard' | 'minimal';
-export type Personality = 'loyalFriend' | 'professional' | 'coach' | 'drillSergeant' | 'funny' | 'calm';
+export type ViewMode = 'conversation' | 'oneThing' | 'list' | 'insights';
+export type Personality = 'loyalFriend' | 'coach' | 'playful' | 'calm';
 export type ThinkingMode = 'off' | 'minimal' | 'full';
 export type NotificationStyle = 'gentle' | 'variable' | 'persistent';
 export type MoodLevel = 'low' | 'neutral' | 'high';

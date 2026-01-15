@@ -23,48 +23,36 @@ export const C = {
 // Supabase Config (User will add their own keys in settings)
 export const SUPABASE_URL = 'https://wektbfkzbxvtxsremnnk.supabase.co';
 
-// ============ PERSONALITIES ============
+// ============ PERSONALITIES (Simplified to 4 - more ADHD-friendly options) ============
 export const PERSONALITIES: Record<string, { name: string; emoji: string; desc: string; color: string; greetings: string[]; systemPrompt: string }> = {
   loyalFriend: {
-    name: 'Loyal Friend', emoji: '🤗', desc: 'Warm, supportive, casual', color: C.primary,
+    name: 'Friend', emoji: '🤗', desc: 'Warm, supportive, casual', color: C.primary,
     greetings: ["Hey there! 💙", "Hi friend!", "Hey! 👋", "Good to see you!"],
     systemPrompt: "You are Nero, a warm and supportive AI companion for someone with ADHD. Be friendly, use casual language, light humor. Always be encouraging. Never guilt or shame."
   },
-  professional: {
-    name: 'Professional', emoji: '💼', desc: 'Clear, efficient, minimal', color: C.teal,
-    greetings: ["Hello.", "Ready when you are.", "How can I help?"],
-    systemPrompt: "You are Nero, a professional AI assistant for someone with ADHD. Be clear, efficient, and concise. Skip unnecessary words. Respect their time and energy."
-  },
   coach: {
-    name: 'Coach', emoji: '🏆', desc: 'Motivating, pushing gently', color: C.gold,
+    name: 'Coach', emoji: '🏆', desc: 'Motivating, gentle push', color: C.gold,
     greetings: ["Let's go! 💪", "Ready to crush it?", "Champion! Let's do this!"],
     systemPrompt: "You are Nero, a motivating coach for someone with ADHD. Be encouraging, push gently, celebrate wins enthusiastically. Help them see their potential."
   },
-  drillSergeant: {
-    name: 'Drill Sergeant', emoji: '🎖️', desc: 'Direct, firm, no excuses', color: '#E17055',
-    greetings: ["Attention!", "Time to work.", "No excuses today."],
-    systemPrompt: "You are Nero, a firm but fair drill sergeant for someone with ADHD. Be direct, no-nonsense, but ultimately supportive. They chose this mode because they need accountability."
-  },
-  funny: {
-    name: 'Funny', emoji: '😄', desc: 'Playful, jokes, light', color: C.pink,
+  playful: {
+    name: 'Playful', emoji: '😄', desc: 'Jokes, light, fun', color: C.pink,
     greetings: ["Heyyy! 😄", "Look who showed up!", "The legend returns!"],
     systemPrompt: "You are Nero, a playful and funny AI companion for someone with ADHD. Use humor, puns, and keep things light while being helpful. Laughter helps with dopamine!"
   },
   calm: {
-    name: 'Calm/Zen', emoji: '🧘', desc: 'Soft, gentle, no pressure', color: C.teal,
+    name: 'Calm', emoji: '🧘', desc: 'Soft, gentle, zen', color: C.teal,
     greetings: ["Welcome 🌿", "Peace, friend.", "Breathe. You're here now."],
     systemPrompt: "You are Nero, a calm and zen AI companion for someone with ADHD. Be gentle, soft-spoken, never rush. Create a peaceful space. Anxiety is real."
   },
 };
 
-// ============ VIEWS ============
+// ============ VIEWS (Simplified to 4 for less overwhelm) ============
 export const VIEWS: Record<string, { name: string; emoji: string; desc: string }> = {
   conversation: { name: 'Chat', emoji: '💬', desc: 'Talk with Nero' },
   oneThing: { name: 'Focus', emoji: '🎯', desc: 'One task at a time' },
   list: { name: 'List', emoji: '📝', desc: 'All your tasks' },
-  timeline: { name: 'Timeline', emoji: '📅', desc: "Today's schedule" },
-  dashboard: { name: 'Stats', emoji: '📊', desc: 'Your progress' },
-  minimal: { name: 'Minimal', emoji: '🌙', desc: 'Low energy mode' },
+  insights: { name: 'Insights', emoji: '📊', desc: 'Patterns & schedule' },
 };
 
 // ============ ACHIEVEMENTS ============
@@ -135,6 +123,43 @@ export const MICRO_STARTS = [
   "Write one word",
   "Take one breath, then start",
 ];
+
+// ============ STUCK/PARALYSIS MODE ============
+export const STUCK_MODE_PROMPTS = {
+  initial: [
+    "I hear you. Being stuck is real and valid. Let's work through this gently. 💙",
+    "Executive dysfunction is tough. I'm here with you. No pressure. 🌿",
+    "It's okay. Your brain isn't broken - it just works differently. Let's try something tiny. ✨",
+  ],
+  bodyMovement: [
+    "Can you stand up and touch a wall, then come back? Just that. 🚶",
+    "Try wiggling your fingers for 5 seconds. Seriously, just that. ✋",
+    "Take one deep breath. Just one. I'll wait. 🌬️",
+    "Stretch your arms up for 3 seconds. That's it. 💪",
+  ],
+  microSteps: [
+    "Can you just LOOK at the task? Not do it - just look at it. 👀",
+    "What's the tiniest possible piece? Like, embarrassingly tiny? 🔬",
+    "Forget the whole task. What's ONE word you could type? ⌨️",
+    "Can you open the thing you need? Just open it, nothing else. 📂",
+  ],
+  randomTask: [
+    "Want me to just pick something random for you? Remove the choice entirely? 🎲",
+    "Sometimes any action beats no action. Should I pick one at random? 🎯",
+    "Decision paralysis is real. I can choose for you if that helps. 🤝",
+  ],
+  validation: [
+    "Some days the win is just being here. That counts. 💙",
+    "You showed up. That's not nothing. 🌟",
+    "Progress isn't always visible. You're still moving forward. 🐢",
+    "It's okay to rest. You're not lazy - you're human. 🌙",
+  ],
+  exitPrompts: [
+    "Ready to try something? Or need more time? Either is fine. 🌿",
+    "No rush. When you're ready, I'm here. 💙",
+    "Take all the time you need. I'm not going anywhere. 🤗",
+  ],
+};
 
 // ============ PROACTIVE CHECK-IN MESSAGES ============
 export const PROACTIVE_CHECKIN_MESSAGES = {

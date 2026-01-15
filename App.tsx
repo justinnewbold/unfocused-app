@@ -61,8 +61,8 @@ const discovery = {
 
 // ============ TYPES ============
 type EnergyLevel = 'low' | 'medium' | 'high';
-type ViewMode = 'conversation' | 'oneThing' | 'list' | 'timeline' | 'dashboard' | 'minimal';
-type Personality = 'loyalFriend' | 'professional' | 'coach' | 'drillSergeant' | 'funny' | 'calm';
+type ViewMode = 'conversation' | 'oneThing' | 'list' | 'insights';
+type Personality = 'loyalFriend' | 'coach' | 'playful' | 'calm';
 type ThinkingMode = 'off' | 'minimal' | 'full';
 type NotificationStyle = 'gentle' | 'variable' | 'persistent';
 
@@ -215,32 +215,22 @@ const SUPABASE_URL = 'https://wektbfkzbxvtxsremnnk.supabase.co';
 
 const PERSONALITIES: Record<string, { name: string; emoji: string; desc: string; color: string; greetings: string[]; systemPrompt: string }> = {
   loyalFriend: {
-    name: 'Loyal Friend', emoji: '🤗', desc: 'Warm, supportive, casual', color: C.primary,
+    name: 'Friend', emoji: '🤗', desc: 'Warm, supportive, casual', color: C.primary,
     greetings: ["Hey there! 💙", "Hi friend!", "Hey! 👋", "Good to see you!"],
     systemPrompt: "You are Nero, a warm and supportive AI companion for someone with ADHD. Be friendly, use casual language, light humor. Always be encouraging. Never guilt or shame."
   },
-  professional: {
-    name: 'Professional', emoji: '💼', desc: 'Clear, efficient, minimal', color: C.teal,
-    greetings: ["Hello.", "Ready when you are.", "How can I help?"],
-    systemPrompt: "You are Nero, a professional AI assistant for someone with ADHD. Be clear, efficient, and concise. Skip unnecessary words. Respect their time and energy."
-  },
   coach: {
-    name: 'Coach', emoji: '🏆', desc: 'Motivating, pushing gently', color: C.gold,
+    name: 'Coach', emoji: '🏆', desc: 'Motivating, gentle push', color: C.gold,
     greetings: ["Let's go! 💪", "Ready to crush it?", "Champion! Let's do this!"],
     systemPrompt: "You are Nero, a motivating coach for someone with ADHD. Be encouraging, push gently, celebrate wins enthusiastically. Help them see their potential."
   },
-  drillSergeant: {
-    name: 'Drill Sergeant', emoji: '🎖️', desc: 'Direct, firm, no excuses', color: '#E17055',
-    greetings: ["Attention!", "Time to work.", "No excuses today."],
-    systemPrompt: "You are Nero, a firm but fair drill sergeant for someone with ADHD. Be direct, no-nonsense, but ultimately supportive. They chose this mode because they need accountability."
-  },
-  funny: {
-    name: 'Funny', emoji: '😄', desc: 'Playful, jokes, light', color: C.pink,
+  playful: {
+    name: 'Playful', emoji: '😄', desc: 'Jokes, light, fun', color: C.pink,
     greetings: ["Heyyy! 😄", "Look who showed up!", "The legend returns!"],
     systemPrompt: "You are Nero, a playful and funny AI companion for someone with ADHD. Use humor, puns, and keep things light while being helpful. Laughter helps with dopamine!"
   },
   calm: {
-    name: 'Calm/Zen', emoji: '🧘', desc: 'Soft, gentle, no pressure', color: C.teal,
+    name: 'Calm', emoji: '🧘', desc: 'Soft, gentle, zen', color: C.teal,
     greetings: ["Welcome 🌿", "Peace, friend.", "Breathe. You're here now."],
     systemPrompt: "You are Nero, a calm and zen AI companion for someone with ADHD. Be gentle, soft-spoken, never rush. Create a peaceful space. Anxiety is real."
   },
@@ -250,9 +240,39 @@ const VIEWS: Record<string, { name: string; emoji: string; desc: string }> = {
   conversation: { name: 'Chat', emoji: '💬', desc: 'Talk with Nero' },
   oneThing: { name: 'Focus', emoji: '🎯', desc: 'One task at a time' },
   list: { name: 'List', emoji: '📝', desc: 'All your tasks' },
-  timeline: { name: 'Timeline', emoji: '📅', desc: "Today's schedule" },
-  dashboard: { name: 'Stats', emoji: '📊', desc: 'Your progress' },
-  minimal: { name: 'Minimal', emoji: '🌙', desc: 'Low energy mode' },
+  insights: { name: 'Insights', emoji: '📊', desc: 'Patterns & schedule' },
+};
+
+// ============ STUCK MODE PROMPTS ============
+const STUCK_MODE_PROMPTS = {
+  initial: [
+    "I hear you. Being stuck is real and valid. Let's work through this gently. 💙",
+    "Executive dysfunction is tough. I'm here with you. No pressure. 🌿",
+    "It's okay. Your brain isn't broken - it just works differently. Let's try something tiny. ✨",
+  ],
+  bodyMovement: [
+    "Can you stand up and touch a wall, then come back? Just that. 🚶",
+    "Try wiggling your fingers for 5 seconds. Seriously, just that. ✋",
+    "Take one deep breath. Just one. I'll wait. 🌬️",
+    "Stretch your arms up for 3 seconds. That's it. 💪",
+  ],
+  microSteps: [
+    "Can you just LOOK at the task? Not do it - just look at it. 👀",
+    "What's the tiniest possible piece? Like, embarrassingly tiny? 🔬",
+    "Forget the whole task. What's ONE word you could type? ⌨️",
+    "Can you open the thing you need? Just open it, nothing else. 📂",
+  ],
+  randomTask: [
+    "Want me to just pick something random for you? Remove the choice entirely? 🎲",
+    "Sometimes any action beats no action. Should I pick one at random? 🎯",
+    "Decision paralysis is real. I can choose for you if that helps. 🤝",
+  ],
+  validation: [
+    "Some days the win is just being here. That counts. 💙",
+    "You showed up. That's not nothing. 🌟",
+    "Progress isn't always visible. You're still moving forward. 🐢",
+    "It's okay to rest. You're not lazy - you're human. 🌙",
+  ],
 };
 
 const ACHIEVEMENTS: Achievement[] = [
@@ -1476,6 +1496,16 @@ export default function App() {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [scheduledReminders, setScheduledReminders] = useState<string[]>([]);
 
+  // ============ STUCK/PARALYSIS MODE STATE ============
+  const [isStuckMode, setIsStuckMode] = useState(false);
+  const [stuckStep, setStuckStep] = useState(0);
+  const [stuckMessage, setStuckMessage] = useState('');
+
+  // ============ SWIPE GESTURE STATE ============
+  const [swipingTaskId, setSwipingTaskId] = useState<string | null>(null);
+  const swipeAnim = useRef(new Animated.Value(0)).current;
+  const swipeValue = useRef(0); // Track current swipe value
+
   // Google OAuth Hook
   const redirectUri = AuthSession.makeRedirectUri({
     scheme: 'unfocused',
@@ -1768,6 +1798,114 @@ export default function App() {
 
   const handleCheckInDismiss = () => {
     setActiveCheckIn(null);
+  };
+
+  // ============ STUCK/PARALYSIS MODE HANDLERS ============
+  const enterStuckMode = () => {
+    setIsStuckMode(true);
+    setStuckStep(0);
+    const initialMsg = STUCK_MODE_PROMPTS.initial[Math.floor(Math.random() * STUCK_MODE_PROMPTS.initial.length)];
+    setStuckMessage(initialMsg);
+  };
+
+  const handleStuckAction = (action: 'body' | 'micro' | 'random' | 'validate' | 'exit') => {
+    if (action === 'exit') {
+      setIsStuckMode(false);
+      setStuckStep(0);
+      setStuckMessage('');
+      return;
+    }
+
+    if (action === 'body') {
+      const msg = STUCK_MODE_PROMPTS.bodyMovement[Math.floor(Math.random() * STUCK_MODE_PROMPTS.bodyMovement.length)];
+      setStuckMessage(msg);
+      setStuckStep(1);
+    } else if (action === 'micro') {
+      const msg = STUCK_MODE_PROMPTS.microSteps[Math.floor(Math.random() * STUCK_MODE_PROMPTS.microSteps.length)];
+      setStuckMessage(msg);
+      setStuckStep(2);
+    } else if (action === 'random') {
+      // Pick a random uncompleted task
+      const pendingTasks = tasks.filter(t => !t.completed);
+      if (pendingTasks.length > 0) {
+        const randomTask = pendingTasks[Math.floor(Math.random() * pendingTasks.length)];
+        setStuckMessage(`Okay, I picked this one for you: "${randomTask.title}". No thinking needed - just this one. 🎯`);
+        setStuckStep(3);
+      } else {
+        setStuckMessage("You have no tasks right now - that's actually a win! Maybe add one tiny thing? 📝");
+        setStuckStep(3);
+      }
+    } else if (action === 'validate') {
+      const msg = STUCK_MODE_PROMPTS.validation[Math.floor(Math.random() * STUCK_MODE_PROMPTS.validation.length)];
+      setStuckMessage(msg);
+      setStuckStep(4);
+    }
+  };
+
+  // ============ SWIPE GESTURE HANDLERS ============
+  const handleSwipeComplete = (taskId: string) => {
+    Animated.timing(swipeAnim, {
+      toValue: 300,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      completeTask(taskId);
+      swipeAnim.setValue(0);
+      setSwipingTaskId(null);
+    });
+  };
+
+  const handleSwipeSkip = (taskId: string) => {
+    Animated.timing(swipeAnim, {
+      toValue: -300,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      // Move task to end of list (skip/snooze)
+      setTasks(prev => {
+        const task = prev.find(t => t.id === taskId);
+        if (!task) return prev;
+        const filtered = prev.filter(t => t.id !== taskId);
+        return [...filtered, task];
+      });
+      swipeAnim.setValue(0);
+      setSwipingTaskId(null);
+    });
+  };
+
+  const createPanResponder = (taskId: string) => {
+    return {
+      onStartShouldSetResponder: () => true,
+      onMoveShouldSetResponder: () => true,
+      onResponderGrant: () => {
+        setSwipingTaskId(taskId);
+        swipeValue.current = 0;
+      },
+      onResponderMove: (evt: any) => {
+        const dx = evt.nativeEvent.pageX - evt.nativeEvent.locationX;
+        // Clamp the movement
+        const clampedDx = Math.max(-100, Math.min(100, dx));
+        swipeValue.current = clampedDx;
+        swipeAnim.setValue(clampedDx);
+      },
+      onResponderRelease: () => {
+        const dx = swipeValue.current;
+        if (dx > 60) {
+          handleSwipeComplete(taskId);
+        } else if (dx < -60) {
+          handleSwipeSkip(taskId);
+        } else {
+          // Reset position
+          Animated.spring(swipeAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start(() => {
+            setSwipingTaskId(null);
+            swipeValue.current = 0;
+          });
+        }
+      },
+    };
   };
 
   // Handle Google OAuth response
@@ -3214,34 +3352,57 @@ export default function App() {
                 ))}
               </View>
 
+              {/* Swipe hint */}
+              <View style={S.swipeHint}>
+                <Text style={S.swipeHintT}>← Skip • Swipe tasks • Complete →</Text>
+              </View>
+
               <ScrollView style={S.taskList}>
                 {filteredTasks.map(task => (
-                  <View key={task.id} style={[S.taskI, task.isMicroStep && S.taskIMicro]}>
-                    <TouchableOpacity
-                      style={[S.chk, task.completed && S.chkD]}
-                      onPress={() => completeTask(task.id)}
+                  <View key={task.id} style={S.swipeContainer}>
+                    {/* Background actions revealed on swipe */}
+                    <View style={S.swipeBgLeft}>
+                      <Text style={S.swipeBgText}>⏭️ Skip</Text>
+                    </View>
+                    <View style={S.swipeBgRight}>
+                      <Text style={S.swipeBgText}>✓ Done</Text>
+                    </View>
+
+                    {/* Swipeable task */}
+                    <Animated.View
+                      style={[
+                        S.taskI,
+                        task.isMicroStep && S.taskIMicro,
+                        swipingTaskId === task.id && { transform: [{ translateX: swipeAnim }] }
+                      ]}
+                      {...(!task.completed ? createPanResponder(task.id) : {})}
                     >
-                      {task.completed && <Text style={S.chkT}>✓</Text>}
-                    </TouchableOpacity>
-                    <View style={[S.taskE, { backgroundColor: getEC(task.energy) }]} />
-                    <Text style={[S.taskT, task.completed && S.taskTD]} numberOfLines={2}>
-                      {task.title}
-                    </Text>
-                    {task.isMicroStep && <Text style={S.microL}>✨</Text>}
-                    {task.calendarEventId && <Text style={S.microL}>📅</Text>}
-                    {!task.completed && profile.calendarConnected && !task.calendarEventId && (
-                      <TouchableOpacity onPress={() => scheduleTaskOnCalendar(task.id)}>
-                        <Text style={S.taskA}>📅</Text>
+                      <TouchableOpacity
+                        style={[S.chk, task.completed && S.chkD]}
+                        onPress={() => completeTask(task.id)}
+                      >
+                        {task.completed && <Text style={S.chkT}>✓</Text>}
                       </TouchableOpacity>
-                    )}
-                    {!task.isMicroStep && !task.completed && (
-                      <TouchableOpacity onPress={() => breakdownTask(task.id)}>
-                        <Text style={S.taskA}>🔨</Text>
+                      <View style={[S.taskE, { backgroundColor: getEC(task.energy) }]} />
+                      <Text style={[S.taskT, task.completed && S.taskTD]} numberOfLines={2}>
+                        {task.title}
+                      </Text>
+                      {task.isMicroStep && <Text style={S.microL}>✨</Text>}
+                      {task.calendarEventId && <Text style={S.microL}>📅</Text>}
+                      {!task.completed && profile.calendarConnected && !task.calendarEventId && (
+                        <TouchableOpacity onPress={() => scheduleTaskOnCalendar(task.id)}>
+                          <Text style={S.taskA}>📅</Text>
+                        </TouchableOpacity>
+                      )}
+                      {!task.isMicroStep && !task.completed && (
+                        <TouchableOpacity onPress={() => breakdownTask(task.id)}>
+                          <Text style={S.taskA}>🔨</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity onPress={() => setTasks(p => p.filter(t => t.id !== task.id))}>
+                        <Text style={S.taskA}>🗑️</Text>
                       </TouchableOpacity>
-                    )}
-                    <TouchableOpacity onPress={() => setTasks(p => p.filter(t => t.id !== task.id))}>
-                      <Text style={S.taskA}>🗑️</Text>
-                    </TouchableOpacity>
+                    </Animated.View>
                   </View>
                 ))}
                 {filteredTasks.length === 0 && (
@@ -3253,235 +3414,144 @@ export default function App() {
             </View>
           )}
 
-          {/* TIMELINE VIEW */}
-          {view === 'timeline' && (
-            <ScrollView style={S.timeC}>
-              <Text style={S.timeTitle}>Today's Flow</Text>
-              <Text style={S.timeSubtitle}>{completedToday} tasks completed • {calendarEvents.length} events</Text>
-              
-              {/* Quick Actions for Calendar */}
-              {profile.calendarConnected && (
-                <View style={{ flexDirection: 'row', marginBottom: 16, gap: 8 }}>
-                  <TouchableOpacity 
-                    style={[S.syncBtn, { flex: 1 }]}
-                    onPress={() => createFocusBlock(30)}
-                  >
-                    <Text style={S.syncBtnT}>🎯 30min Focus</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[S.syncBtn, { flex: 1 }]}
-                    onPress={() => createFocusBlock(60)}
-                  >
-                    <Text style={S.syncBtnT}>🎯 1hr Focus</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[S.syncBtn, { flex: 1, backgroundColor: C.surface }]}
-                    onPress={syncCalendarEvents}
-                  >
-                    <Text style={[S.syncBtnT, { color: C.text }]}>⟳ Sync</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map(hour => {
-                const now = new Date();
-                const isNow = now.getHours() === hour;
-                const isPast = now.getHours() > hour;
-                const event = calendarEvents.find(e => {
-                  const start = new Date(e.start).getHours();
-                  return start === hour;
-                });
-
-                return (
-                  <View key={hour} style={S.timeH}>
-                    <Text style={[S.timeTm, isPast && S.timeTmPast]}>
-                      {hour > 12 ? `${hour - 12}pm` : hour === 12 ? '12pm' : `${hour}am`}
-                    </Text>
-                    <View style={[S.timeSlot, isNow && S.timeSlotNow, event && { backgroundColor: event.color || C.primary + '40' }]}>
-                      {isNow && <View style={S.curLine} />}
-                      {event && <Text style={S.timeEventT}>{event.title}</Text>}
-                    </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          )}
-
-          {/* DASHBOARD VIEW */}
-          {view === 'dashboard' && (
+          {/* INSIGHTS VIEW (Combined Timeline + Dashboard) */}
+          {view === 'insights' && (
             <ScrollView style={S.dashC}>
-              <Text style={S.dashT}>Your Progress</Text>
-
+              {/* Quick Stats - Simplified */}
               <View style={S.dashStats}>
+                <View style={S.dashS}>
+                  <Text style={S.dashSV}>{completedToday}</Text>
+                  <Text style={S.dashSL}>Today</Text>
+                </View>
                 <View style={S.dashS}>
                   <Text style={S.dashSV}>{stats.tasksCompleted}</Text>
-                  <Text style={S.dashSL}>Tasks Done</Text>
-                </View>
-                <View style={S.dashS}>
-                  <Text style={S.dashSV}>{stats.totalPoints}</Text>
-                  <Text style={S.dashSL}>Points</Text>
-                </View>
-                <View style={S.dashS}>
-                  <Text style={S.dashSV}>{stats.streak}</Text>
-                  <Text style={S.dashSL}>Day Streak</Text>
-                </View>
-              </View>
-
-              <View style={S.dashStats}>
-                <View style={S.dashS}>
-                  <Text style={S.dashSV}>{stats.daysActive}</Text>
-                  <Text style={S.dashSL}>Days Active</Text>
+                  <Text style={S.dashSL}>Total</Text>
                 </View>
                 <View style={S.dashS}>
                   <Text style={S.dashSV}>{stats.lowEnergyWins}</Text>
                   <Text style={S.dashSL}>Low E Wins</Text>
                 </View>
-                <View style={S.dashS}>
-                  <Text style={S.dashSV}>{completedToday}</Text>
-                  <Text style={S.dashSL}>Today</Text>
-                </View>
               </View>
 
-              {/* AI Pattern Analysis Section */}
-              <View style={S.patternSection}>
-                <Text style={S.patternTitle}>🧠 AI Pattern Analysis</Text>
-                
-                {/* Peak Hours */}
-                <View style={S.insightCard}>
-                  <Text style={S.insightEmoji}>⚡</Text>
-                  <View style={S.insightContent}>
-                    <Text style={S.insightTitle}>Your Peak Hours</Text>
-                    <Text style={S.insightText}>
-                      {patternService.getPeakHours().map(h => {
-                        const ampm = h >= 12 ? 'PM' : 'AM';
-                        const hour12 = h % 12 || 12;
-                        return `${hour12}${ampm}`;
-                      }).join(', ') || 'Start completing tasks to see patterns!'}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Productivity Chart */}
-                <View style={S.chartContainer}>
-                  <Text style={S.chartTitle}>Hourly Productivity</Text>
-                  <View style={S.chartBars}>
-                    {patternService.getHourlyStats().filter(h => h.hour >= 6 && h.hour <= 22).map(hourData => {
-                      const maxCompletions = Math.max(...patternService.getHourlyStats().map(h => h.completions), 1);
-                      const height = (hourData.completions / maxCompletions) * 60;
-                      const isPeak = patternService.getPeakHours().includes(hourData.hour);
-                      return (
-                        <View key={hourData.hour} style={S.chartBarWrapper}>
-                          <View style={[S.chartBar, { height: Math.max(height, 4), backgroundColor: isPeak ? C.gold : C.primary }]} />
-                          <Text style={S.chartLabel}>{hourData.hour % 12 || 12}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-
-                {/* Weekly Trend */}
-                <View style={S.insightCard}>
-                  <Text style={S.insightEmoji}>
-                    {patternService.getWeeklyTrend() === 'improving' ? '📈' : patternService.getWeeklyTrend() === 'declining' ? '📉' : '➡️'}
+              {/* Simple Pattern Insight - One Key Message */}
+              <View style={[S.insightCard, { marginBottom: 16 }]}>
+                <Text style={S.insightEmoji}>⚡</Text>
+                <View style={S.insightContent}>
+                  <Text style={S.insightTitle}>Your Best Time</Text>
+                  <Text style={S.insightText}>
+                    {patternService.getPeakHours().length > 0
+                      ? `You work best around ${patternService.getPeakHours().map(h => {
+                          const hour12 = h % 12 || 12;
+                          const ampm = h >= 12 ? 'PM' : 'AM';
+                          return `${hour12}${ampm}`;
+                        }).slice(0, 2).join(' and ')}`
+                      : 'Complete some tasks to discover your patterns!'}
                   </Text>
-                  <View style={S.insightContent}>
-                    <Text style={S.insightTitle}>Weekly Trend</Text>
-                    <Text style={S.insightText}>
-                      {patternService.getWeeklyTrend() === 'improving' 
-                        ? "You're crushing it! More done than last week! 🎉" 
-                        : patternService.getWeeklyTrend() === 'declining'
-                        ? "Slower week - that's okay! Be gentle with yourself. 💙"
-                        : "Steady pace - consistency is your superpower! ✨"}
-                    </Text>
-                  </View>
                 </View>
-
-                {/* AI Generated Insight */}
-                <TouchableOpacity 
-                  style={S.aiInsightCard}
-                  onPress={async () => {
-                    setLoadingInsight(true);
-                    const patterns = patternService.getPatternData();
-                    const insight = await patternService.generateAIInsights(profile.apiKey, patterns, profile);
-                    setAiInsight(insight);
-                    setLoadingInsight(false);
-                  }}
-                >
-                  <Text style={S.aiInsightEmoji}>🤖</Text>
-                  <View style={S.aiInsightContent}>
-                    <Text style={S.aiInsightTitle}>
-                      {loadingInsight ? 'Analyzing your patterns...' : 'Nero\'s Insight'}
-                    </Text>
-                    <Text style={S.aiInsightText}>
-                      {loadingInsight ? '⏳' : aiInsight || 'Tap for a personalized AI insight about your productivity patterns!'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Weekly Insights */}
-                {weeklyInsights.length > 0 && (
-                  <>
-                    <Text style={[S.achT, { marginTop: 16 }]}>💡 Insights for You</Text>
-                    {weeklyInsights.slice(0, 3).map(insight => (
-                      <View key={insight.id} style={S.insightCard}>
-                        <Text style={S.insightEmoji}>{insight.emoji}</Text>
-                        <View style={S.insightContent}>
-                          <Text style={S.insightTitle}>{insight.title}</Text>
-                          <Text style={S.insightText}>{insight.message}</Text>
-                        </View>
-                      </View>
-                    ))}
-                  </>
-                )}
               </View>
 
-              <Text style={S.achT}>Achievements ({achievements.length}/{ACHIEVEMENTS.length})</Text>
-              <View style={S.achG}>
-                {ACHIEVEMENTS.map(a => {
-                  const unlocked = achievements.includes(a.id);
+              {/* Today's Schedule - Compact */}
+              <Text style={S.timeTitle}>Today's Schedule</Text>
+              <Text style={S.timeSubtitle}>{calendarEvents.length} events</Text>
+
+              {profile.calendarConnected && (
+                <View style={{ flexDirection: 'row', marginBottom: 12, gap: 8 }}>
+                  <TouchableOpacity
+                    style={[S.syncBtn, { flex: 1 }]}
+                    onPress={() => createFocusBlock(30)}
+                  >
+                    <Text style={S.syncBtnT}>🎯 30min</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[S.syncBtn, { flex: 1 }]}
+                    onPress={() => createFocusBlock(60)}
+                  >
+                    <Text style={S.syncBtnT}>🎯 1hr</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[S.syncBtn, { flex: 1, backgroundColor: C.surface }]}
+                    onPress={syncCalendarEvents}
+                  >
+                    <Text style={[S.syncBtnT, { color: C.text }]}>⟳</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Simplified Timeline - Only show 6 hours around now */}
+              {(() => {
+                const now = new Date();
+                const currentHour = now.getHours();
+                const startHour = Math.max(6, currentHour - 2);
+                const endHour = Math.min(22, currentHour + 4);
+                const hours = [];
+                for (let h = startHour; h <= endHour; h++) hours.push(h);
+
+                return hours.map(hour => {
+                  const isNow = currentHour === hour;
+                  const isPast = currentHour > hour;
+                  const event = calendarEvents.find(e => new Date(e.start).getHours() === hour);
+
                   return (
-                    <View key={a.id} style={[S.achI, !unlocked && S.achIL]}>
-                      <Text style={S.achE}>{unlocked ? a.emoji : '🔒'}</Text>
-                      <Text style={S.achN}>{a.name}</Text>
-                      <Text style={S.achP}>{a.points} pts</Text>
+                    <View key={hour} style={S.timeH}>
+                      <Text style={[S.timeTm, isPast && S.timeTmPast]}>
+                        {hour > 12 ? `${hour - 12}pm` : hour === 12 ? '12pm' : `${hour}am`}
+                      </Text>
+                      <View style={[S.timeSlot, isNow && S.timeSlotNow, event && { backgroundColor: event.color || C.primary + '40' }]}>
+                        {isNow && <View style={S.curLine} />}
+                        {event && <Text style={S.timeEventT}>{event.title}</Text>}
+                      </View>
                     </View>
                   );
-                })}
+                });
+              })()}
+
+              {/* Weekly Trend - Simple */}
+              <View style={[S.insightCard, { marginTop: 16 }]}>
+                <Text style={S.insightEmoji}>
+                  {patternService.getWeeklyTrend() === 'improving' ? '📈' : patternService.getWeeklyTrend() === 'declining' ? '📉' : '➡️'}
+                </Text>
+                <View style={S.insightContent}>
+                  <Text style={S.insightTitle}>This Week</Text>
+                  <Text style={S.insightText}>
+                    {patternService.getWeeklyTrend() === 'improving'
+                      ? "Better than last week! 🎉"
+                      : patternService.getWeeklyTrend() === 'declining'
+                      ? "Slower week - that's okay! 💙"
+                      : "Steady pace! ✨"}
+                  </Text>
+                </View>
               </View>
 
-              {thoughtDumps.length > 0 && (
-                <>
-                  <Text style={[S.achT, { marginTop: 24 }]}>Recent Thoughts ({thoughtDumps.length})</Text>
-                  {thoughtDumps.slice(0, 5).map(t => (
-                    <View key={t.id} style={S.thoughtI}>
-                      <Text style={S.thoughtT}>{t.text}</Text>
-                      <Text style={S.thoughtD}>{formatDate(new Date(t.timestamp))}</Text>
-                    </View>
-                  ))}
-                </>
-              )}
+              {/* Achievements - Compact, only unlocked */}
+              <Text style={[S.achT, { marginTop: 16 }]}>
+                Achievements ({achievements.length})
+              </Text>
+              <View style={S.achG}>
+                {ACHIEVEMENTS.filter(a => achievements.includes(a.id)).slice(0, 6).map(a => (
+                  <View key={a.id} style={S.achI}>
+                    <Text style={S.achE}>{a.emoji}</Text>
+                    <Text style={S.achN}>{a.name}</Text>
+                  </View>
+                ))}
+                {achievements.length === 0 && (
+                  <Text style={S.emptyListT}>Complete tasks to unlock achievements! 🏆</Text>
+                )}
+              </View>
             </ScrollView>
           )}
-
-          {/* MINIMAL VIEW */}
-          {view === 'minimal' && (
-            <View style={S.minC}>
-              <Text style={S.minG}>Hey{profile.name ? `, ${profile.name}` : ''} 💙</Text>
-              <Text style={S.minM}>Take it easy. One tiny thing when you're ready.</Text>
-
-              {nextTask && (
-                <TouchableOpacity style={S.minTask} onPress={() => completeTask(nextTask.id)}>
-                  <Text style={S.minTaskT}>{nextTask.title}</Text>
-                  <Text style={S.minTaskH}>Tap when done</Text>
-                </TouchableOpacity>
-              )}
-
-              <TouchableOpacity style={S.minEnergy} onPress={() => setEnergy(null)}>
-                <Text style={S.minEnergyT}>Change energy</Text>
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
+
+        {/* FLOATING "I'M STUCK" BUTTON */}
+        {!isStuckMode && view !== 'conversation' && (
+          <TouchableOpacity
+            style={S.stuckFab}
+            onPress={enterStuckMode}
+            activeOpacity={0.8}
+          >
+            <Text style={S.stuckFabT}>😵‍💫</Text>
+            <Text style={S.stuckFabL}>Stuck?</Text>
+          </TouchableOpacity>
+        )}
 
         {/* BOTTOM NAV */}
         <View style={S.nav}>
@@ -3729,6 +3799,64 @@ export default function App() {
                     console.log('Nudges updated');
                   }}
                 />
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        {/* STUCK/PARALYSIS MODE MODAL */}
+        <Modal visible={isStuckMode} transparent animationType="fade">
+          <View style={S.stuckOverlay}>
+            <View style={S.stuckCard}>
+              <TouchableOpacity style={S.stuckClose} onPress={() => handleStuckAction('exit')}>
+                <Text style={S.stuckCloseT}>×</Text>
+              </TouchableOpacity>
+
+              <Text style={S.stuckEmoji}>😵‍💫</Text>
+              <Text style={S.stuckTitle}>Feeling Stuck?</Text>
+              <Text style={S.stuckMessage}>{stuckMessage}</Text>
+
+              {stuckStep === 0 && (
+                <View style={S.stuckActions}>
+                  <TouchableOpacity style={S.stuckBtn} onPress={() => handleStuckAction('body')}>
+                    <Text style={S.stuckBtnE}>🚶</Text>
+                    <Text style={S.stuckBtnT}>Move my body</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.stuckBtn} onPress={() => handleStuckAction('micro')}>
+                    <Text style={S.stuckBtnE}>🔬</Text>
+                    <Text style={S.stuckBtnT}>Tiny step</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.stuckBtn} onPress={() => handleStuckAction('random')}>
+                    <Text style={S.stuckBtnE}>🎲</Text>
+                    <Text style={S.stuckBtnT}>Pick for me</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.stuckBtn} onPress={() => handleStuckAction('validate')}>
+                    <Text style={S.stuckBtnE}>💙</Text>
+                    <Text style={S.stuckBtnT}>Just validate me</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {stuckStep > 0 && stuckStep < 4 && (
+                <View style={S.stuckActions}>
+                  <TouchableOpacity style={S.stuckBtnPrimary} onPress={() => handleStuckAction('exit')}>
+                    <Text style={S.stuckBtnPrimaryT}>I'll try that</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.stuckBtnSec} onPress={() => setStuckStep(0)}>
+                    <Text style={S.stuckBtnSecT}>Something else</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {stuckStep === 4 && (
+                <View style={S.stuckActions}>
+                  <TouchableOpacity style={S.stuckBtnPrimary} onPress={() => handleStuckAction('exit')}>
+                    <Text style={S.stuckBtnPrimaryT}>Thanks, I needed that 💙</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.stuckBtnSec} onPress={() => setStuckStep(0)}>
+                    <Text style={S.stuckBtnSecT}>I want to try something</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           </View>
@@ -4032,5 +4160,37 @@ const S = StyleSheet.create({
   // Focus Timer Button
   focusTimerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: C.primary, marginHorizontal: 16, marginBottom: 16, paddingVertical: 14, borderRadius: 16, shadowColor: C.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   focusTimerBtnT: { color: C.text, fontSize: 16, fontWeight: '700', marginLeft: 8 },
+
+  // ============ STUCK MODE STYLES ============
+  stuckFab: { position: 'absolute', right: 16, bottom: 90, backgroundColor: C.card, borderRadius: 20, paddingVertical: 10, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 6, borderWidth: 1, borderColor: C.border },
+  stuckFabT: { fontSize: 20, marginRight: 6 },
+  stuckFabL: { color: C.textSec, fontSize: 12, fontWeight: '600' },
+
+  stuckOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  stuckCard: { backgroundColor: C.card, borderRadius: 24, padding: 28, width: '100%', maxWidth: 360, alignItems: 'center', borderWidth: 1, borderColor: C.border },
+  stuckClose: { position: 'absolute', top: 12, right: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: C.surface, justifyContent: 'center', alignItems: 'center' },
+  stuckCloseT: { color: C.textMuted, fontSize: 24, lineHeight: 26 },
+  stuckEmoji: { fontSize: 56, marginBottom: 16 },
+  stuckTitle: { color: C.text, fontSize: 24, fontWeight: '700', marginBottom: 8 },
+  stuckMessage: { color: C.textSec, fontSize: 16, textAlign: 'center', marginBottom: 24, lineHeight: 24 },
+
+  stuckActions: { width: '100%', gap: 10 },
+  stuckBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: C.border },
+  stuckBtnE: { fontSize: 24, marginRight: 12 },
+  stuckBtnT: { color: C.text, fontSize: 15, fontWeight: '500' },
+
+  stuckBtnPrimary: { backgroundColor: C.primary, borderRadius: 14, padding: 16, alignItems: 'center' },
+  stuckBtnPrimaryT: { color: C.text, fontSize: 16, fontWeight: '700' },
+  stuckBtnSec: { backgroundColor: 'transparent', borderRadius: 14, padding: 14, alignItems: 'center' },
+  stuckBtnSecT: { color: C.textSec, fontSize: 14 },
+
+  // ============ SWIPE GESTURE STYLES ============
+  swipeHint: { paddingVertical: 8, paddingHorizontal: 16, backgroundColor: C.surface, borderRadius: 8, marginHorizontal: 16, marginBottom: 8, alignItems: 'center' },
+  swipeHintT: { color: C.textMuted, fontSize: 11, fontWeight: '500' },
+
+  swipeContainer: { position: 'relative', marginBottom: 8, overflow: 'hidden', borderRadius: 14 },
+  swipeBgLeft: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 100, backgroundColor: C.warning, justifyContent: 'center', paddingLeft: 16, borderRadius: 14 },
+  swipeBgRight: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 100, backgroundColor: C.success, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 16, borderRadius: 14 },
+  swipeBgText: { color: C.bg, fontSize: 14, fontWeight: '700' },
 });
 
