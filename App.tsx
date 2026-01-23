@@ -2376,6 +2376,9 @@ export default function App() {
     // Record completion for pattern analysis
     const completedTask = { ...task, completedAt, completionTimeMs };
     const record = patternService.recordCompletion(completedTask);
+    
+    // Track task completion in breadcrumbs
+    getContextBreadcrumbService().trackTaskComplete(id, task.title);
     setCompletionHistory(prev => [...prev, record]);
 
     // Update insights
