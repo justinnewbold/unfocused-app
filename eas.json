@@ -8,38 +8,63 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
+        "resourceClass": "m-medium",
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      },
+      "env": {
+        "APP_VARIANT": "development"
+      }
+    },
+    "development-simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium",
         "simulator": true
+      },
+      "env": {
+        "APP_VARIANT": "development"
       }
     },
     "preview": {
       "distribution": "internal",
       "ios": {
-        "simulator": false
+        "resourceClass": "m-medium"
       },
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "preview"
       }
     },
     "production": {
       "autoIncrement": true,
       "ios": {
-        "image": "latest"
+        "resourceClass": "m-medium"
       },
       "android": {
-        "image": "latest"
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "APP_VARIANT": "production"
       }
     }
   },
   "submit": {
     "production": {
       "ios": {
-        "appleId": "your-apple-id@email.com",
-        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID",
+        "appleId": "justin@newbold.cloud",
+        "ascAppId": "APPLE_APP_STORE_CONNECT_APP_ID",
         "appleTeamId": "YOUR_APPLE_TEAM_ID"
       },
       "android": {
-        "serviceAccountKeyPath": "./google-play-service-account.json",
-        "track": "production"
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "internal"
       }
     }
   }
