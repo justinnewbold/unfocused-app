@@ -34,6 +34,18 @@ export { SleepService, getSleepService, initializeSleepService } from './SleepSe
 export { WeatherService, getWeatherService, initializeWeatherService } from './WeatherService';
 export { AccessibilityService, getAccessibilityService, initializeAccessibilityService } from './AccessibilityService';
 
+// Additional Feature Services (Part 3)
+export { PanicModeService, getPanicModeService, initializePanicModeService } from './PanicModeService';
+export { TaskFreshnessService, getTaskFreshnessService, initializeTaskFreshnessService } from './TaskFreshnessService';
+export { TaskImportService, getTaskImportService, initializeTaskImportService } from './TaskImportService';
+export { WellnessService, getWellnessService, initializeWellnessService } from './WellnessService';
+export { ScreenTimeService, getScreenTimeService, initializeScreenTimeService } from './ScreenTimeService';
+export { OfflineQueueService, getOfflineQueueService, initializeOfflineQueueService } from './OfflineQueueService';
+export { EncryptionService, getEncryptionService, initializeEncryptionService } from './EncryptionService';
+export { DataPortabilityService, getDataPortabilityService, initializeDataPortabilityService } from './DataPortabilityService';
+export { PremiumService, getPremiumService, initializePremiumService } from './PremiumService';
+export { SystemIntegrationService, getSystemIntegrationService, initializeSystemIntegrationService } from './SystemIntegrationService';
+
 // Re-export types for convenience
 export type {
   FocusSession,
