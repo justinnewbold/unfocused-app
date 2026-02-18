@@ -97,7 +97,10 @@ export class PushNotificationService {
         this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(settingsJson) };
       }
       if (scheduledJson) {
-        this.scheduledNotifications = JSON.parse(scheduledJson);
+        this.scheduledNotifications = JSON.parse(scheduledJson).map((n: any) => ({
+          ...n,
+          scheduledTime: new Date(n.scheduledTime),
+        }));
       }
 
       // Register for push notifications

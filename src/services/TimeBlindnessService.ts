@@ -422,9 +422,10 @@ export class TimeBlindnessService {
     return landmarks.map(lm => {
       const lmMinutes = lm.hour * 60;
       let diff = lmMinutes - currentMinutes;
-      const isPast = diff < 0;
 
       if (diff < -12 * 60) diff += 24 * 60; // Wrap around
+
+      const isPast = diff < 0;
 
       return {
         label: lm.label,

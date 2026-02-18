@@ -1591,6 +1591,9 @@ export default function App() {
     loadData();
     requestNotificationPermission();
     initializeNativeServices();
+    return () => {
+      notificationService.clearAll();
+    };
   }, []);
 
   // Initialize native services
@@ -1880,6 +1883,7 @@ export default function App() {
       onStartShouldSetResponder: () => true,
       onMoveShouldSetResponder: () => true,
       onResponderGrant: (evt: any) => {
+        swipeAnim.setValue(0);
         setSwipingTaskId(taskId);
         swipeValue.current = 0;
         swipeStartX.current = evt.nativeEvent.pageX;
@@ -2133,14 +2137,17 @@ export default function App() {
       week_warrior: newStats.daysActive >= 7,
     };
 
+    const newAchievements: Achievement[] = [];
     for (const ach of ACHIEVEMENTS) {
       if (conditions[ach.id] && !achievements.includes(ach.id)) {
-        setAchievements(prev => [...prev, ach.id]);
-        setShowAch(ach);
-        setStats(s => ({ ...s, totalPoints: s.totalPoints + ach.points }));
-        setTimeout(() => setShowAch(null), 3500);
-        break;
+        newAchievements.push(ach);
       }
+    }
+    if (newAchievements.length > 0) {
+      setAchievements(prev => [...prev, ...newAchievements.map(a => a.id)]);
+      setStats(s => ({ ...s, totalPoints: s.totalPoints + newAchievements.reduce((sum, a) => sum + a.points, 0) }));
+      setShowAch(newAchievements[0]);
+      setTimeout(() => setShowAch(null), 3500);
     }
   };
 
@@ -2377,17 +2384,20 @@ export default function App() {
     setCompletionHistory(prev => [...prev, record]);
 
     // Update insights
-    const newInsights = patternService.generateInsights(profile, energy, tasks);
+    const updatedTasks = tasks.map(t => t.id === id ? { ...t, completed: true, completedAt, completionTimeMs } : t);
+    const newInsights = patternService.generateInsights(profile, energy, updatedTasks);
     setWeeklyInsights(newInsights);
 
-    const newStats = {
-      ...stats,
-      tasksCompleted: stats.tasksCompleted + 1,
-      lowEnergyWins: (energy === 'low' || task.energy === 'low') ? stats.lowEnergyWins + 1 : stats.lowEnergyWins,
-      microSteps: task.isMicroStep ? stats.microSteps + 1 : stats.microSteps,
-    };
-    setStats(newStats);
-    checkAchievements(newStats);
+    setStats(prevStats => {
+      const newStats = {
+        ...prevStats,
+        tasksCompleted: prevStats.tasksCompleted + 1,
+        lowEnergyWins: (energy === 'low' || task.energy === 'low') ? prevStats.lowEnergyWins + 1 : prevStats.lowEnergyWins,
+        microSteps: task.isMicroStep ? prevStats.microSteps + 1 : prevStats.microSteps,
+      };
+      checkAchievements(newStats);
+      return newStats;
+    });
 
     // Celebration
     setCelebText(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
@@ -2437,8 +2447,11 @@ export default function App() {
 
   // ============ MESSAGE FUNCTIONS ============
 
+  const sendingRef = useRef(false);
+
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || sendingRef.current) return;
+    sendingRef.current = true;
 
     const userMsg: Message = {
       id: genId(),
@@ -2502,6 +2515,7 @@ export default function App() {
     if (profile.neroVoiceEnabled) {
       speakNeroResponse(response.content);
     }
+    sendingRef.current = false;
   };
 
   // ============ CONTEXT FUNCTIONS ============
@@ -3081,6 +3095,16 @@ export default function App() {
             <Text style={S.setSecT}>Data</Text>
             <TouchableOpacity style={S.dangerBtn} onPress={async () => {
               await AsyncStorage.clear();
+              setTasks([]);
+              setMessages([]);
+              setAchievements([]);
+              setEnergy(null);
+              setBreadcrumbs([]);
+              setSavedContexts([]);
+              setThoughtDumps([]);
+              setCompletionHistory([]);
+              setMoodHistory([]);
+              setNeroMemory({ likes: [], dislikes: [], triggers: [], patterns: [] });
               setScreen('welcome');
             }}>
               <Text style={S.dangerBtnT}>Reset All Data</Text>
