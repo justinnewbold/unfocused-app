@@ -282,7 +282,7 @@ export class AccountabilityService {
     );
 
     for (const partner of this.settings.partners) {
-      if (partner.shareLevel !== 'summary') continue;
+      if (partner.shareLevel === 'none') continue;
       await this.sendUpdate(partner.id, 'milestone', summary);
     }
   }

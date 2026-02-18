@@ -271,7 +271,7 @@ export class OfflineQueueService {
     }, this.settings.syncIntervalMs);
   }
 
-  async forcSync(): Promise<{
+  async forceSync(): Promise<{
     processed: number;
     succeeded: number;
     failed: number;

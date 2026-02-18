@@ -300,6 +300,7 @@ export class FocusMusicService {
           }
           await this.stop();
           resolve();
+          return;
         }
         if (this.currentSound) {
           await this.currentSound.setVolumeAsync(currentVolume);

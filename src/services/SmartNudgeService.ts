@@ -109,11 +109,11 @@ export class SmartNudgeService {
 
     for (let hour = 6; hour <= 22; hour++) {
       const focusMinutes = focusHourly.get(hour) || 0;
-      const avgEnergy = energyHourly.get(hour) || 5; // Default to medium energy
+      const avgEnergy = energyHourly.get(hour) || 3; // Default to medium energy (scale 1-5)
 
       // Weighted score: focus history (60%) + energy (40%)
       const normalizedFocus = focusMinutes / (Math.max(...Array.from(focusHourly.values())) || 1);
-      const normalizedEnergy = avgEnergy / 10;
+      const normalizedEnergy = avgEnergy / 5;
       const score = normalizedFocus * 0.6 + normalizedEnergy * 0.4;
 
       hourScores.push({ hour, score, focusMinutes, avgEnergy });

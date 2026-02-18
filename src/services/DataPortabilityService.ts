@@ -47,7 +47,7 @@ const DATA_CATEGORIES: DataCategory[] = [
     id: 'tasks',
     name: 'Tasks',
     description: 'All your tasks and to-dos',
-    storageKey: 'tasks',
+    storageKey: 'nero_tasks',
     sensitivityLevel: 'low',
     canDelete: true,
   },

@@ -379,9 +379,9 @@ export class ScreenTimeService {
 
     // Weekly comparison
     const weekUsage = this.getWeekUsage();
-    const lastWeekTotal = weekUsage.slice(0, 3).reduce((s, d) => s + d.totalMinutes, 0);
+    const firstHalfTotal = weekUsage.slice(0, 4).reduce((s, d) => s + d.totalMinutes, 0);
     const thisWeekTotal = weekUsage.slice(4).reduce((s, d) => s + d.totalMinutes, 0);
-    if (thisWeekTotal > lastWeekTotal * 1.5 && lastWeekTotal > 0) {
+    if (thisWeekTotal > firstHalfTotal * 1.5 && firstHalfTotal > 0) {
       insights.push(`📈 App usage up 50% this week. Everything okay?`);
     }
 

@@ -73,7 +73,7 @@ class DataSyncService {
 
     try {
       const tasks = await TasksAPI.getAll(this.userId);
-      return tasks.map(this.mapDbTaskToTask);
+      return tasks.map(t => this.mapDbTaskToTask(t));
     } catch (error) {
       console.error('Error fetching tasks:', error);
       return this.getLocalTasks(); // Fallback to local
@@ -280,7 +280,7 @@ class DataSyncService {
         startDate.toISOString(),
         endDate.toISOString()
       );
-      return sessions.map(this.mapDbSessionToSession);
+      return sessions.map(s => this.mapDbSessionToSession(s));
     } catch (error) {
       console.error('Error fetching focus sessions:', error);
       return this.getLocalFocusSessions();
@@ -343,7 +343,7 @@ class DataSyncService {
         startDate.toISOString(),
         endDate.toISOString()
       );
-      return logs.map(this.mapDbLogToLog);
+      return logs.map(l => this.mapDbLogToLog(l));
     } catch (error) {
       console.error('Error fetching energy logs:', error);
       return this.getLocalEnergyLogs();

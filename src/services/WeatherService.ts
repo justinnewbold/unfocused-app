@@ -127,11 +127,11 @@ export class WeatherService {
 
     // Weight conditions by season (northern hemisphere assumption)
     let conditionWeights: number[];
-    if (month >= 5 && month <= 8) {
-      // Summer
+    if (month >= 5 && month <= 7) {
+      // Summer (Jun-Aug)
       conditionWeights = [40, 30, 15, 10, 0, 5]; // More sunny
-    } else if (month >= 11 || month <= 2) {
-      // Winter
+    } else if (month >= 11 || month <= 1) {
+      // Winter (Dec-Feb)
       conditionWeights = [15, 25, 20, 5, 25, 10]; // More snow/cloud
     } else {
       // Spring/Fall

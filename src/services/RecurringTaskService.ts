@@ -252,6 +252,8 @@ export class RecurringTaskService {
 
     // Make sure it's in the future
     if (next <= fromDate) {
+      // Advance by at least one day to prevent infinite recursion
+      next.setDate(next.getDate() + 1);
       return this.calculateNextOccurrence(rule, next);
     }
 
