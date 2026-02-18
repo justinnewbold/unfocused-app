@@ -144,8 +144,8 @@ export class TaskEstimationService {
       suggested = Math.round(userEstimate * this.learning.suggestedMultiplier);
       confidence = 40;
       reasoning = this.learning.tendencyToOverestimate
-        ? `You tend to underestimate by ${Math.round((this.learning.suggestedMultiplier - 1) * 100)}%`
-        : `You tend to overestimate by ${Math.round((1 - this.learning.suggestedMultiplier) * 100)}%`;
+        ? `You tend to overestimate by ${Math.round((1 - this.learning.suggestedMultiplier) * 100)}%`
+        : `You tend to underestimate by ${Math.round((this.learning.suggestedMultiplier - 1) * 100)}%`;
     } else {
       // Default suggestion based on energy
       const baseMinutes = energy === 'high' ? 45 : energy === 'medium' ? 25 : 15;

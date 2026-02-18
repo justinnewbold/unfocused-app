@@ -8,6 +8,7 @@ export class FocusTimerService {
   private settings: FocusTimerSettings = DEFAULT_FOCUS_TIMER_SETTINGS;
   private timerInterval: NodeJS.Timeout | null = null;
   private remainingSeconds: number = 0;
+  private statusBeforePause: 'running' | 'break' = 'running';
   private onTick: ((remaining: number) => void) | null = null;
   private onComplete: ((session: FocusSession) => void) | null = null;
   private onBreakStart: (() => void) | null = null;
@@ -120,6 +121,7 @@ export class FocusTimerService {
 
   pause(): void {
     if (this.currentSession?.status === 'running' || this.currentSession?.status === 'break') {
+      this.statusBeforePause = this.currentSession.status as 'running' | 'break';
       this.stopTimer();
       this.currentSession.status = 'paused';
     }
@@ -127,7 +129,7 @@ export class FocusTimerService {
 
   resume(): void {
     if (this.currentSession?.status === 'paused') {
-      this.currentSession.status = 'running';
+      this.currentSession.status = this.statusBeforePause;
       this.startTimer();
     }
   }

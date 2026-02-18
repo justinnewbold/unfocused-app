@@ -204,6 +204,7 @@ const C = {
   warning: '#FDCB6E',
   error: '#FF7675',
   border: '#3D3D5C',
+  surface: '#1E1E38',
   gold: '#F9CA24',
   teal: '#00CEC9',
   pink: '#FD79A8',
@@ -1505,6 +1506,7 @@ export default function App() {
   const [swipingTaskId, setSwipingTaskId] = useState<string | null>(null);
   const swipeAnim = useRef(new Animated.Value(0)).current;
   const swipeValue = useRef(0); // Track current swipe value
+  const swipeStartX = useRef(0); // Track swipe start position
 
   // Google OAuth Hook
   const redirectUri = AuthSession.makeRedirectUri({
@@ -1589,6 +1591,9 @@ export default function App() {
     loadData();
     requestNotificationPermission();
     initializeNativeServices();
+    return () => {
+      notificationService.clearAll();
+    };
   }, []);
 
   // Initialize native services
@@ -1877,12 +1882,14 @@ export default function App() {
     return {
       onStartShouldSetResponder: () => true,
       onMoveShouldSetResponder: () => true,
-      onResponderGrant: () => {
+      onResponderGrant: (evt: any) => {
+        swipeAnim.setValue(0);
         setSwipingTaskId(taskId);
         swipeValue.current = 0;
+        swipeStartX.current = evt.nativeEvent.pageX;
       },
       onResponderMove: (evt: any) => {
-        const dx = evt.nativeEvent.pageX - evt.nativeEvent.locationX;
+        const dx = evt.nativeEvent.pageX - swipeStartX.current;
         // Clamp the movement
         const clampedDx = Math.max(-100, Math.min(100, dx));
         swipeValue.current = clampedDx;
@@ -1958,9 +1965,9 @@ export default function App() {
       // Send welcome message
       const neroMsg: Message = {
         id: genId(),
-        role: 'assistant',
+        role: 'nero',
         content: "🎉 Google Calendar connected! I can now see your schedule and help you plan your day. Want me to find a good time slot for your tasks?",
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
       };
       setMessages(m => [...m, neroMsg]);
       
@@ -2060,7 +2067,7 @@ export default function App() {
         patternService.setHistory(data['@uf/completions']);
       }
 
-      setScreen(data['@uf/onb'] === true ? 'main' : 'welcome');
+      setScreen(data['@uf/onb'] === true || data['@uf/onb'] === 'true' ? 'main' : 'welcome');
     } catch (e) {
       console.error('Load error:', e);
     } finally {
@@ -2130,14 +2137,17 @@ export default function App() {
       week_warrior: newStats.daysActive >= 7,
     };
 
+    const newAchievements: Achievement[] = [];
     for (const ach of ACHIEVEMENTS) {
       if (conditions[ach.id] && !achievements.includes(ach.id)) {
-        setAchievements(prev => [...prev, ach.id]);
-        setShowAch(ach);
-        setStats(s => ({ ...s, totalPoints: s.totalPoints + ach.points }));
-        setTimeout(() => setShowAch(null), 3500);
-        break;
+        newAchievements.push(ach);
       }
+    }
+    if (newAchievements.length > 0) {
+      setAchievements(prev => [...prev, ...newAchievements.map(a => a.id)]);
+      setStats(s => ({ ...s, totalPoints: s.totalPoints + newAchievements.reduce((sum, a) => sum + a.points, 0) }));
+      setShowAch(newAchievements[0]);
+      setTimeout(() => setShowAch(null), 3500);
     }
   };
 
@@ -2214,7 +2224,7 @@ export default function App() {
     setIsRecording(false);
     const audioUri = await voiceService.stopRecording();
     
-    if (audioUri && anthropicKey) {
+    if (audioUri && profile.apiKey) {
       // For now, we'll use a simple speech indicator
       // In production, integrate with Whisper API
       setVoiceTranscript('Processing voice...');
@@ -2227,7 +2237,7 @@ export default function App() {
           id: genId(),
           role: 'user',
           content: '🎤 [Voice input captured - integrate Whisper API for transcription]',
-          timestamp: Date.now(),
+          timestamp: new Date().toISOString(),
         };
         setMessages(m => [...m, voiceMsg]);
       }, 1000);
@@ -2286,9 +2296,9 @@ export default function App() {
       const timeStr = scheduleTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const neroMsg: Message = {
         id: genId(),
-        role: 'assistant',
+        role: 'nero',
         content: `📅 Done! I've scheduled "${task.title}" for ${timeStr}. I'll remind you when it's time!`,
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
       };
       setMessages(m => [...m, neroMsg]);
 
@@ -2331,9 +2341,9 @@ export default function App() {
       const timeStr = startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const neroMsg: Message = {
         id: genId(),
-        role: 'assistant',
+        role: 'nero',
         content: `🎯 Focus block created! You have ${durationMinutes} minutes blocked at ${timeStr}. I'll help you stay focused when it's time.`,
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
       };
       setMessages(m => [...m, neroMsg]);
       
@@ -2374,17 +2384,20 @@ export default function App() {
     setCompletionHistory(prev => [...prev, record]);
 
     // Update insights
-    const newInsights = patternService.generateInsights(profile, energy, tasks);
+    const updatedTasks = tasks.map(t => t.id === id ? { ...t, completed: true, completedAt, completionTimeMs } : t);
+    const newInsights = patternService.generateInsights(profile, energy, updatedTasks);
     setWeeklyInsights(newInsights);
 
-    const newStats = {
-      ...stats,
-      tasksCompleted: stats.tasksCompleted + 1,
-      lowEnergyWins: (energy === 'low' || task.energy === 'low') ? stats.lowEnergyWins + 1 : stats.lowEnergyWins,
-      microSteps: task.isMicroStep ? stats.microSteps + 1 : stats.microSteps,
-    };
-    setStats(newStats);
-    checkAchievements(newStats);
+    setStats(prevStats => {
+      const newStats = {
+        ...prevStats,
+        tasksCompleted: prevStats.tasksCompleted + 1,
+        lowEnergyWins: (energy === 'low' || task.energy === 'low') ? prevStats.lowEnergyWins + 1 : prevStats.lowEnergyWins,
+        microSteps: task.isMicroStep ? prevStats.microSteps + 1 : prevStats.microSteps,
+      };
+      checkAchievements(newStats);
+      return newStats;
+    });
 
     // Celebration
     setCelebText(CELEBRATIONS[Math.floor(Math.random() * CELEBRATIONS.length)]);
@@ -2434,8 +2447,11 @@ export default function App() {
 
   // ============ MESSAGE FUNCTIONS ============
 
+  const sendingRef = useRef(false);
+
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || sendingRef.current) return;
+    sendingRef.current = true;
 
     const userMsg: Message = {
       id: genId(),
@@ -2499,6 +2515,7 @@ export default function App() {
     if (profile.neroVoiceEnabled) {
       speakNeroResponse(response.content);
     }
+    sendingRef.current = false;
   };
 
   // ============ CONTEXT FUNCTIONS ============
@@ -3078,6 +3095,16 @@ export default function App() {
             <Text style={S.setSecT}>Data</Text>
             <TouchableOpacity style={S.dangerBtn} onPress={async () => {
               await AsyncStorage.clear();
+              setTasks([]);
+              setMessages([]);
+              setAchievements([]);
+              setEnergy(null);
+              setBreadcrumbs([]);
+              setSavedContexts([]);
+              setThoughtDumps([]);
+              setCompletionHistory([]);
+              setMoodHistory([]);
+              setNeroMemory({ likes: [], dislikes: [], triggers: [], patterns: [] });
               setScreen('welcome');
             }}>
               <Text style={S.dangerBtnT}>Reset All Data</Text>
@@ -3094,7 +3121,7 @@ export default function App() {
   const pendingTasks = tasks.filter(t => !t.completed);
   const filteredTasks = filter === 'all' ? pendingTasks : pendingTasks.filter(t => t.energy === filter);
   const nextTask = pendingTasks[0];
-  const completedToday = tasks.filter(t => t.completed && new Date(t.createdAt).toDateString() === new Date().toDateString()).length;
+  const completedToday = tasks.filter(t => t.completed && t.completedAt && new Date(t.completedAt).toDateString() === new Date().toDateString()).length;
 
   return (
     <SafeAreaView style={S.container}>
@@ -3234,12 +3261,6 @@ export default function App() {
 
               <View style={S.inC}>
                 <View style={S.inR}>
-                  <TouchableOpacity
-                    style={[S.iconBtn, listening && S.iconBtnA]}
-                    onPress={startVoiceInput}
-                  >
-                    <Text>{listening ? '🔴' : '🎤'}</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity style={S.iconBtn} onPress={() => setShowThought(true)}>
                     <Text>💭</Text>
                   </TouchableOpacity>
@@ -3257,7 +3278,7 @@ export default function App() {
                   )}
                   <TextInput
                     style={S.tIn}
-                    value={voiceTranscript || input}
+                    value={isRecording ? (voiceTranscript || input) : input}
                     onChangeText={setInput}
                     placeholder={isRecording ? 'Listening...' : `Talk to ${profile.neroName}...`}
                     placeholderTextColor={isRecording ? C.error : C.textMuted}
@@ -3778,7 +3799,7 @@ export default function App() {
                   onDismiss={() => setShowWeeklyReport(false)}
                   onViewDetails={() => {
                     setShowWeeklyReport(false);
-                    setView('dashboard');
+                    setView('insights');
                   }}
                 />
               )}

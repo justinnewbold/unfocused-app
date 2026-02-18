@@ -108,11 +108,6 @@ export class SmartNotificationService {
     });
     if (recentDismissed.length >= 2) return false;
 
-    // Be more gentle during low mood
-    if (mood === 'low') {
-      this.style = 'gentle';
-    }
-
     return true;
   }
 

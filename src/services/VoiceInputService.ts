@@ -37,6 +37,7 @@ export class VoiceInputService {
   
   // Web-specific
   private mediaRecorder: MediaRecorder | null = null;
+  private mediaStream: MediaStream | null = null;
   private audioChunks: Blob[] = [];
 
   constructor(config: VoiceInputConfig) {
@@ -78,6 +79,7 @@ export class VoiceInputService {
   private async startWebRecording(): Promise<boolean> {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.mediaStream = stream;
       this.mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       this.audioChunks = [];
 
@@ -85,15 +87,6 @@ export class VoiceInputService {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
         }
-      };
-
-      this.mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
-        const duration = (Date.now() - this.recordingStartTime) / 1000;
-        await this.transcribeAudio(audioBlob, duration);
-        
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
       };
 
       this.mediaRecorder.start();
@@ -153,10 +146,16 @@ export class VoiceInputService {
       this.mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
         const duration = (Date.now() - this.recordingStartTime) / 1000;
-        
+
         this.isRecording = false;
         this.config.onRecordingStop?.();
-        
+
+        // Stop all media stream tracks to release the microphone
+        if (this.mediaStream) {
+          this.mediaStream.getTracks().forEach(track => track.stop());
+          this.mediaStream = null;
+        }
+
         const result = await this.transcribeAudio(audioBlob, duration);
         resolve(result);
       };

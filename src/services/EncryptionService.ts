@@ -305,7 +305,7 @@ export class EncryptionService {
     // Note: This is simplified - in production use proper PBKDF2
     let key = password + salt;
 
-    for (let i = 0; i < Math.min(this.settings.keyDerivationIterations, 1000); i++) {
+    for (let i = 0; i < this.settings.keyDerivationIterations; i++) {
       const digest = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
         key

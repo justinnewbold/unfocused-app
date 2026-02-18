@@ -475,8 +475,8 @@ export class TransitionService {
   private async saveHistory(): Promise<void> {
     try {
       // Keep last 200 records
-      const toSave = this.history.slice(-200);
-      await AsyncStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(toSave));
+      this.history = this.history.slice(-200);
+      await AsyncStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(this.history));
     } catch (error) {
       console.error('Failed to save transition history:', error);
     }

@@ -70,7 +70,7 @@ const toLocalTask = (task: SupabaseTask): LocalTask => ({
   energy: task.priority >= 3 ? 'high' : task.priority >= 2 ? 'medium' : 'low',
   completed: task.completed,
   isMicroStep: task.tags?.includes('micro-step') || false,
-  createdAt: new Date().toISOString(),
+  createdAt: task.created_at || new Date().toISOString(),
   completedAt: task.completed_at,
   synced: true,
 });
@@ -137,7 +137,9 @@ export function useSupabaseSync({ userId, onTasksLoaded }: SyncHookOptions) {
         title: updates.title,
         completed: updates.completed,
         completed_at: updates.completedAt,
-        priority: updates.energy === 'high' ? 3 : updates.energy === 'medium' ? 2 : 1,
+        ...(updates.energy !== undefined && {
+          priority: updates.energy === 'high' ? 3 : updates.energy === 'medium' ? 2 : 1,
+        }),
       };
       return await TasksAPI.update(taskId, supabaseUpdates);
     } catch (error) {

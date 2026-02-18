@@ -33,6 +33,7 @@ export function FocusTimer({
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isBreak, setIsBreak] = useState(false);
+  const [isLongBreak, setIsLongBreak] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [completedPomodoros, setCompletedPomodoros] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -47,7 +48,7 @@ export function FocusTimer({
         setRemainingSeconds(remaining);
         // Update progress animation
         const total = isBreak
-          ? settings.shortBreakDuration * 60
+          ? (isLongBreak ? settings.longBreakDuration : settings.shortBreakDuration) * 60
           : settings.focusDuration * 60;
         const progress = remaining / total;
         Animated.timing(progressAnim, {
@@ -128,6 +129,8 @@ export function FocusTimer({
   const startBreak = (isLong: boolean = false) => {
     service.startBreak(isLong);
     setIsBreak(true);
+    setIsLongBreak(isLong);
+    setIsRunning(true);
     const breakDuration = isLong
       ? settings.longBreakDuration
       : settings.shortBreakDuration;
@@ -137,6 +140,8 @@ export function FocusTimer({
   const skipBreak = () => {
     service.skipBreak();
     setIsBreak(false);
+    setIsLongBreak(false);
+    setIsRunning(true);
     setRemainingSeconds(settings.focusDuration * 60);
   };
 

@@ -324,7 +324,8 @@ export class CommunityService {
   // ============ REPLIES ============
 
   async addReply(postId: string, content: string): Promise<CommunityReply | null> {
-    const post = this.feedCache.find(p => p.id === postId);
+    const post = this.feedCache.find(p => p.id === postId)
+      || this.myPosts.find(p => p.id === postId);
     if (!post) return null;
 
     const reply: CommunityReply = {
@@ -342,7 +343,8 @@ export class CommunityService {
   }
 
   async markReplyHelpful(postId: string, replyId: string): Promise<boolean> {
-    const post = this.feedCache.find(p => p.id === postId);
+    const post = this.feedCache.find(p => p.id === postId)
+      || this.myPosts.find(p => p.id === postId);
     if (!post) return false;
 
     const reply = post.replies.find(r => r.id === replyId);

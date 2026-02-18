@@ -107,7 +107,6 @@ export class PatternAnalysisService {
   }
 
   getPatternData(): PatternData {
-    const avgByEnergy: Record<EnergyLevel, number> = { low: 0, medium: 0, high: 0 };
     const countByEnergy: Record<EnergyLevel, number> = { low: 0, medium: 0, high: 0 };
 
     this.completionHistory.forEach(r => {

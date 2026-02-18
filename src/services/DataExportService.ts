@@ -216,11 +216,14 @@ export class DataExportService {
   }
 
   private anonymizeTasks(tasks: Task[]): Task[] {
-    return tasks.map(task => ({
-      ...task,
-      title: `Task ${task.id.slice(-4)}`, // Replace title with generic
-      id: this.hashString(task.id),
-    }));
+    return tasks.map(task => {
+      const anonId = this.hashString(task.id);
+      return {
+        ...task,
+        title: `Task ${anonId.slice(-4)}`,
+        id: anonId,
+      };
+    });
   }
 
   private hashString(str: string): string {
