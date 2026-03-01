@@ -31,6 +31,11 @@ import { useAuth } from './src/hooks/useAuth';
 import { useSupabaseSync } from './src/hooks/useSupabaseSync';
 import { AuthScreen } from './src/components/AuthScreen';
 import { WeeklyReportCard } from './src/components/WeeklyReportCard';
+
+// ============ VOICE & BREADCRUMBS UI COMPONENTS ============
+import { VoiceInputButton } from './src/components/VoiceInputButton';
+import { BreadcrumbTrail } from './src/components/BreadcrumbTrail';
+import { getContextBreadcrumbService } from './src/services/ContextBreadcrumbService';
 import { SmartNudgeSetup } from './src/components/SmartNudgeSetup';
 import { WeeklyReportService, type WeeklyReportData } from './src/services/WeeklyReportService';
 import { supabase, FocusSessionsAPI, EnergyLogsAPI, TasksAPI } from './src/services/supabase';
@@ -2381,6 +2386,9 @@ export default function App() {
     // Record completion for pattern analysis
     const completedTask = { ...task, completedAt, completionTimeMs };
     const record = patternService.recordCompletion(completedTask);
+    
+    // Track task completion in breadcrumbs
+    getContextBreadcrumbService().trackTaskComplete(id, task.title);
     setCompletionHistory(prev => [...prev, record]);
 
     // Update insights
@@ -3453,6 +3461,21 @@ export default function App() {
                   <Text style={S.dashSL}>Low E Wins</Text>
                 </View>
               </View>
+              {/* CONTEXT BREADCRUMB TRAIL - Where You Left Off */}
+              <BreadcrumbTrail
+                compact={true}
+                maxItems={5}
+                onTaskSelect={(taskId, taskTitle) => {
+                  // Find and highlight the task
+                  const task = tasks.find(t => t.id === taskId);
+                  if (task && !task.completed) {
+                    setView('oneThing');
+                  }
+                }}
+                onSnapshotRestore={(snapshot) => {
+                  celebrate('Context restored! 🔄');
+                }}
+              />
 
               {/* Simple Pattern Insight - One Key Message */}
               <View style={[S.insightCard, { marginBottom: 16 }]}>
@@ -3573,6 +3596,48 @@ export default function App() {
             <Text style={S.stuckFabL}>Stuck?</Text>
           </TouchableOpacity>
         )}
+
+
+        {/* VOICE INPUT FLOATING BUTTON */}
+        <VoiceInputButton
+          apiKey={profile.apiKey || ''}
+          onTaskCaptured={(text) => {
+            // Add the task
+            const newT: Task = {
+              id: genId(),
+              title: text,
+              energy: energy || 'medium',
+              completed: false,
+              isMicroStep: false,
+              createdAt: new Date().toISOString(),
+            };
+            setTasks(prev => [newT, ...prev]);
+            // Track breadcrumb
+            getContextBreadcrumbService().trackTaskStart(newT.id, newT.title, newT.energy);
+            celebrate('Task captured! ✨');
+          }}
+          onThoughtCaptured={(text) => {
+            // Add to thought dumps
+            setThoughtDumps(prev => [{ id: genId(), text, timestamp: new Date().toISOString() }, ...prev]);
+            getContextBreadcrumbService().trackThought(text);
+            celebrate('Thought captured! 💭');
+          }}
+          onReminderCaptured={(text) => {
+            // Add as high-priority task
+            const newT: Task = {
+              id: genId(),
+              title: `⏰ ${text}`,
+              energy: 'low',
+              completed: false,
+              isMicroStep: false,
+              createdAt: new Date().toISOString(),
+            };
+            setTasks(prev => [newT, ...prev]);
+            celebrate('Reminder set! ⏰');
+          }}
+          position="bottomLeft"
+          disabled={!profile.apiKey}
+        />
 
         {/* BOTTOM NAV */}
         <View style={S.nav}>
